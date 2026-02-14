@@ -1,0 +1,64 @@
+/**
+ * Spamtroll Admin Styles
+ *
+ * @package Spamtroll
+ * @since   0.1.0
+ */
+
+/* Status badges */
+.spamtroll-badge {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.4;
+	text-transform: uppercase;
+}
+
+.spamtroll-badge--blocked {
+	background: #fcebea;
+	color: #a02121;
+}
+
+.spamtroll-badge--suspicious {
+	background: #fef3e0;
+	color: #8a6116;
+}
+
+.spamtroll-badge--safe {
+	background: #e8f5e9;
+	color: #2e7d32;
+}
+
+/* Test connection result */
+#spamtroll-test-result {
+	display: inline-block;
+	margin-left: 8px;
+	font-weight: 500;
+}
+
+#spamtroll-test-result.spamtroll-testing {
+	color: #666;
+}
+
+#spamtroll-test-result.spamtroll-success {
+	color: #2e7d32;
+}
+
+#spamtroll-test-result.spamtroll-error {
+	color: #a02121;
+}
+
+/* Logs table */
+.spamtroll-preview {
+	max-width: 250px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Filter tabs spacing */
+.wrap .subsubsub {
+	margin-bottom: 8px;
+}
