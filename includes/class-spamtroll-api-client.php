@@ -43,12 +43,23 @@ class Spamtroll_Api_Client {
 	 * @param string|null $base_url Base URL (loads from settings if null).
 	 * @param int|null    $timeout  Timeout in seconds (loads from settings if null).
 	 */
+	/**
+	 * Pinned production API base URL. No longer configurable from
+	 * wp-admin — admins only paste an API key.
+	 */
+	const API_BASE_URL = 'https://api.spamtroll.io/api/v1';
+
+	/**
+	 * Default request timeout (seconds).
+	 */
+	const DEFAULT_TIMEOUT = 5;
+
 	public function __construct( $api_key = null, $base_url = null, $timeout = null ) {
 		$settings = get_option( 'spamtroll_settings', array() );
 
 		$this->api_key  = $api_key !== null ? $api_key : ( isset( $settings['api_key'] ) ? $settings['api_key'] : '' );
-		$this->base_url = rtrim( $base_url !== null ? $base_url : ( isset( $settings['api_url'] ) ? $settings['api_url'] : 'https://api.spamtroll.io/api/v1' ), '/' );
-		$this->timeout  = $timeout !== null ? $timeout : ( isset( $settings['timeout'] ) ? (int) $settings['timeout'] : 5 );
+		$this->base_url = rtrim( $base_url !== null ? $base_url : self::API_BASE_URL, '/' );
+		$this->timeout  = $timeout !== null ? $timeout : self::DEFAULT_TIMEOUT;
 	}
 
 	/**
@@ -128,8 +139,9 @@ class Spamtroll_Api_Client {
 
 		$url  = $this->base_url . $endpoint;
 		$args = array(
-			'timeout' => $this->timeout,
-			'headers' => array(
+			'timeout'   => $this->timeout,
+			'sslverify' => true,
+			'headers'   => array(
 				'X-API-Key'    => $this->api_key,
 				'Content-Type' => 'application/json',
 				'Accept'       => 'application/json',

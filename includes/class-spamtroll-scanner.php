@@ -71,7 +71,7 @@ class Spamtroll_Scanner {
 			$email    = isset( $commentdata['comment_author_email'] ) ? $commentdata['comment_author_email'] : '';
 			$username = isset( $commentdata['comment_author'] ) ? $commentdata['comment_author'] : '';
 
-			$response = $client->check_spam( $content, 'comment', $ip, $username, $email );
+			$response = $this->scan_with_cache( $client, $content, 'comment', $ip, $username, $email );
 
 			if ( ! $response->success ) {
 				error_log( 'Spamtroll: API returned error for comment scan: ' . $response->error );
@@ -165,7 +165,7 @@ class Spamtroll_Scanner {
 			$client = new Spamtroll_Api_Client();
 			$ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 
-			$response = $client->check_spam( $content, 'registration', $ip, $sanitized_user_login, $user_email );
+			$response = $this->scan_with_cache( $client, $content, 'registration', $ip, $sanitized_user_login, $user_email );
 
 			if ( ! $response->success ) {
 				error_log( 'Spamtroll: API returned error for registration scan: ' . $response->error );
@@ -203,6 +203,37 @@ class Spamtroll_Scanner {
 		}
 
 		return $errors;
+	}
+
+	/**
+	 * Call the API with a 1-hour transient cache keyed on the
+	 * content + source + email. Identical repeated submissions (e.g. a
+	 * bot hammering the same comment form with the same payload from
+	 * different IPs) reuse the first verdict instead of burning through
+	 * the user's API quota.
+	 *
+	 * Only caches successful API calls — errors fall straight through so
+	 * we don't lock in a bad verdict.
+	 *
+	 * @param Spamtroll_Api_Client $client
+	 * @param string $content
+	 * @param string $source
+	 * @param string $ip
+	 * @param string $username
+	 * @param string $email
+	 * @return Spamtroll_Api_Response
+	 */
+	private function scan_with_cache( $client, $content, $source, $ip, $username, $email ) {
+		$cache_key = 'spamtroll_scan_' . md5( $source . '|' . $email . '|' . trim( $content ) );
+		$cached    = get_transient( $cache_key );
+		if ( $cached instanceof Spamtroll_Api_Response && $cached->success ) {
+			return $cached;
+		}
+		$response = $client->check_spam( $content, $source, $ip, $username, $email );
+		if ( $response->success ) {
+			set_transient( $cache_key, $response, HOUR_IN_SECONDS );
+		}
+		return $response;
 	}
 
 	/**

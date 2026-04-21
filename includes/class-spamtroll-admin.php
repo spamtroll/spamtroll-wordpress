@@ -83,10 +83,11 @@ class Spamtroll_Admin {
 
 		add_settings_field( 'enabled', __( 'Enable Plugin', 'spamtroll' ), array( $this, 'render_field_enabled' ), 'spamtroll', 'spamtroll_api' );
 		add_settings_field( 'api_key', __( 'API Key', 'spamtroll' ), array( $this, 'render_field_api_key' ), 'spamtroll', 'spamtroll_api' );
-		add_settings_field( 'api_url', __( 'API URL', 'spamtroll' ), array( $this, 'render_field_api_url' ), 'spamtroll', 'spamtroll_api' );
-		add_settings_field( 'timeout', __( 'Timeout (seconds)', 'spamtroll' ), array( $this, 'render_field_timeout' ), 'spamtroll', 'spamtroll_api' );
 
-		// Detection Settings section.
+		// Detection Settings section. Kept small: what to scan +
+		// one sensitivity preset. Numeric thresholds and per-status
+		// action matrix are pinned to safe defaults in
+		// sanitize_settings() so typical admins never see them.
 		add_settings_section(
 			'spamtroll_detection',
 			__( 'Detection Settings', 'spamtroll' ),
@@ -96,19 +97,7 @@ class Spamtroll_Admin {
 
 		add_settings_field( 'check_comments', __( 'Check Comments', 'spamtroll' ), array( $this, 'render_field_check_comments' ), 'spamtroll', 'spamtroll_detection' );
 		add_settings_field( 'check_registrations', __( 'Check Registrations', 'spamtroll' ), array( $this, 'render_field_check_registrations' ), 'spamtroll', 'spamtroll_detection' );
-		add_settings_field( 'spam_threshold', __( 'Spam Threshold', 'spamtroll' ), array( $this, 'render_field_spam_threshold' ), 'spamtroll', 'spamtroll_detection' );
-		add_settings_field( 'suspicious_threshold', __( 'Suspicious Threshold', 'spamtroll' ), array( $this, 'render_field_suspicious_threshold' ), 'spamtroll', 'spamtroll_detection' );
-
-		// Actions section.
-		add_settings_section(
-			'spamtroll_actions',
-			__( 'Actions', 'spamtroll' ),
-			array( $this, 'render_section_actions' ),
-			'spamtroll'
-		);
-
-		add_settings_field( 'action_blocked', __( 'Spam Action', 'spamtroll' ), array( $this, 'render_field_action_blocked' ), 'spamtroll', 'spamtroll_actions' );
-		add_settings_field( 'action_suspicious', __( 'Suspicious Action', 'spamtroll' ), array( $this, 'render_field_action_suspicious' ), 'spamtroll', 'spamtroll_actions' );
+		add_settings_field( 'sensitivity', __( 'Sensitivity', 'spamtroll' ), array( $this, 'render_field_sensitivity' ), 'spamtroll', 'spamtroll_detection' );
 
 		// Bypass Settings section.
 		add_settings_section(
@@ -119,16 +108,6 @@ class Spamtroll_Admin {
 		);
 
 		add_settings_field( 'bypass_roles', __( 'Bypass Roles', 'spamtroll' ), array( $this, 'render_field_bypass_roles' ), 'spamtroll', 'spamtroll_bypass' );
-
-		// Maintenance section.
-		add_settings_section(
-			'spamtroll_maintenance',
-			__( 'Maintenance', 'spamtroll' ),
-			array( $this, 'render_section_maintenance' ),
-			'spamtroll'
-		);
-
-		add_settings_field( 'log_retention_days', __( 'Log Retention (days)', 'spamtroll' ), array( $this, 'render_field_log_retention_days' ), 'spamtroll', 'spamtroll_maintenance' );
 	}
 
 	/**
@@ -140,17 +119,41 @@ class Spamtroll_Admin {
 	public function sanitize_settings( $input ) {
 		$sanitized = array();
 
-		$sanitized['enabled']              = ! empty( $input['enabled'] ) ? 1 : 0;
-		$sanitized['api_key']              = isset( $input['api_key'] ) ? sanitize_text_field( $input['api_key'] ) : '';
-		$sanitized['api_url']              = isset( $input['api_url'] ) ? esc_url_raw( $input['api_url'] ) : 'https://api.spamtroll.io/api/v1';
-		$sanitized['timeout']              = isset( $input['timeout'] ) ? min( 30, max( 1, absint( $input['timeout'] ) ) ) : 5;
-		$sanitized['check_comments']       = ! empty( $input['check_comments'] ) ? 1 : 0;
-		$sanitized['check_registrations']  = ! empty( $input['check_registrations'] ) ? 1 : 0;
-		$sanitized['spam_threshold']       = isset( $input['spam_threshold'] ) ? min( 1.0, max( 0.0, floatval( $input['spam_threshold'] ) ) ) : 0.70;
-		$sanitized['suspicious_threshold'] = isset( $input['suspicious_threshold'] ) ? min( 1.0, max( 0.0, floatval( $input['suspicious_threshold'] ) ) ) : 0.40;
-		$sanitized['action_blocked']       = isset( $input['action_blocked'] ) && in_array( $input['action_blocked'], array( 'block', 'moderate' ), true ) ? $input['action_blocked'] : 'block';
-		$sanitized['action_suspicious']    = isset( $input['action_suspicious'] ) && in_array( $input['action_suspicious'], array( 'moderate', 'allow' ), true ) ? $input['action_suspicious'] : 'moderate';
-		$sanitized['log_retention_days']   = isset( $input['log_retention_days'] ) ? min( 365, max( 1, absint( $input['log_retention_days'] ) ) ) : 30;
+		$sanitized['enabled']             = ! empty( $input['enabled'] ) ? 1 : 0;
+		$sanitized['api_key']             = isset( $input['api_key'] ) ? sanitize_text_field( $input['api_key'] ) : '';
+		$sanitized['check_comments']      = ! empty( $input['check_comments'] ) ? 1 : 0;
+		$sanitized['check_registrations'] = ! empty( $input['check_registrations'] ) ? 1 : 0;
+
+		// Sensitivity preset replaces the two numeric thresholds. Map
+		// to the underlying 0.0-1.0 values the scanner uses internally
+		// so we don't have to touch Spamtroll_Scanner::determine_*.
+		$sensitivity = isset( $input['sensitivity'] ) ? $input['sensitivity'] : 'balanced';
+		if ( ! in_array( $sensitivity, array( 'lenient', 'balanced', 'strict' ), true ) ) {
+			$sensitivity = 'balanced';
+		}
+		$sanitized['sensitivity'] = $sensitivity;
+		switch ( $sensitivity ) {
+			case 'strict':
+				$sanitized['spam_threshold']       = 0.50;
+				$sanitized['suspicious_threshold'] = 0.30;
+				break;
+			case 'lenient':
+				$sanitized['spam_threshold']       = 0.85;
+				$sanitized['suspicious_threshold'] = 0.60;
+				break;
+			case 'balanced':
+			default:
+				$sanitized['spam_threshold']       = 0.70;
+				$sanitized['suspicious_threshold'] = 0.40;
+				break;
+		}
+
+		// Pin the things nobody asked to customize.
+		$sanitized['api_url']            = Spamtroll_Api_Client::API_BASE_URL;
+		$sanitized['timeout']            = Spamtroll_Api_Client::DEFAULT_TIMEOUT;
+		$sanitized['action_blocked']     = 'block';
+		$sanitized['action_suspicious']  = 'moderate';
+		$sanitized['log_retention_days'] = 30;
 
 		// Bypass roles — only allow valid WordPress roles.
 		$valid_roles = array_keys( wp_roles()->roles );
@@ -335,6 +338,24 @@ class Spamtroll_Admin {
 		$value = $this->get_setting( 'check_registrations', 1 );
 		echo '<label><input type="checkbox" name="spamtroll_settings[check_registrations]" value="1" ' . checked( 1, $value, false ) . ' /> '
 			. esc_html__( 'Scan user registrations for spam', 'spamtroll' ) . '</label>';
+	}
+
+	/**
+	 * Render sensitivity preset dropdown.
+	 */
+	public function render_field_sensitivity() {
+		$value   = $this->get_setting( 'sensitivity', 'balanced' );
+		$options = array(
+			'lenient'  => __( 'Lenient — fewer false positives, lets more spam through', 'spamtroll' ),
+			'balanced' => __( 'Balanced (recommended)', 'spamtroll' ),
+			'strict'   => __( 'Strict — blocks aggressively, more false positives', 'spamtroll' ),
+		);
+		echo '<select name="spamtroll_settings[sensitivity]">';
+		foreach ( $options as $key => $label ) {
+			echo '<option value="' . esc_attr( $key ) . '"' . selected( $value, $key, false ) . '>' . esc_html( $label ) . '</option>';
+		}
+		echo '</select>';
+		echo '<p class="description">' . esc_html__( 'How aggressively to treat borderline content.', 'spamtroll' ) . '</p>';
 	}
 
 	/**
