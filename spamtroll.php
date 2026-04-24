@@ -41,11 +41,23 @@ define( 'SPAMTROLL_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'SPAMTROLL_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );
 
 /*
- * Include required class files.
+ * Load the Spamtroll SDK (installed via Composer into the plugin's vendor/).
  */
-require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-api-exception.php';
-require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-api-response.php';
-require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-api-client.php';
+if ( ! file_exists( SPAMTROLL_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
+	add_action( 'admin_notices', function () {
+		echo '<div class="notice notice-error"><p>'
+			. esc_html__( 'Spamtroll is missing its Composer dependencies. Run "composer install --no-dev" in the plugin directory before activating.', 'spamtroll' )
+			. '</p></div>';
+	} );
+	return;
+}
+require_once SPAMTROLL_PLUGIN_DIR . 'vendor/autoload.php';
+
+/*
+ * Include plugin class files.
+ */
+require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-wp-http-client.php';
+require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-sdk-factory.php';
 require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-logger.php';
 require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-scanner.php';
 require_once SPAMTROLL_PLUGIN_DIR . 'includes/class-spamtroll-admin.php';

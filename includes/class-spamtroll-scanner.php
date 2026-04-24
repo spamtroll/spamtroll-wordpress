@@ -66,19 +66,19 @@ class Spamtroll_Scanner {
 		}
 
 		try {
-			$client   = new Spamtroll_Api_Client();
+			$client   = Spamtroll_Sdk_Factory::client();
 			$ip       = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 			$email    = isset( $commentdata['comment_author_email'] ) ? $commentdata['comment_author_email'] : '';
 			$username = isset( $commentdata['comment_author'] ) ? $commentdata['comment_author'] : '';
 
-			$response = $this->scan_with_cache( $client, $content, 'comment', $ip, $username, $email );
+			$response = $this->scan_with_cache( $client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_COMMENT, $ip, $username, $email );
 
 			if ( ! $response->success ) {
 				error_log( 'Spamtroll: API returned error for comment scan: ' . $response->error );
 				return $commentdata;
 			}
 
-			$score  = $response->get_spam_score();
+			$score  = $response->getSpamScore();
 			$status = $this->determine_status( $score );
 			$action = $this->determine_action( $score );
 
@@ -98,14 +98,14 @@ class Spamtroll_Scanner {
 					'ip_address'        => $ip,
 					'status'            => $status,
 					'spam_score'        => $score,
-					'raw_score'         => $response->get_raw_spam_score(),
-					'symbols'           => $response->get_symbols(),
-					'threat_categories' => $response->get_threat_categories(),
+					'raw_score'         => $response->getRawSpamScore(),
+					'symbols'           => $response->getSymbols(),
+					'threat_categories' => $response->getThreatCategories(),
 					'action_taken'      => $action,
 					'content_preview'   => $content,
 				)
 			);
-		} catch ( Spamtroll_Api_Exception $e ) {
+		} catch ( \Spamtroll\Sdk\Exception\SpamtrollException $e ) {
 			// Fail-open: allow the comment through on any API error.
 			error_log( 'Spamtroll: API exception during comment scan: ' . $e->getMessage() );
 		} catch ( Exception $e ) {
@@ -162,17 +162,17 @@ class Spamtroll_Scanner {
 		$content = $sanitized_user_login . ' ' . $user_email;
 
 		try {
-			$client = new Spamtroll_Api_Client();
+			$client = Spamtroll_Sdk_Factory::client();
 			$ip     = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
 
-			$response = $this->scan_with_cache( $client, $content, 'registration', $ip, $sanitized_user_login, $user_email );
+			$response = $this->scan_with_cache( $client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_REGISTRATION, $ip, $sanitized_user_login, $user_email );
 
 			if ( ! $response->success ) {
 				error_log( 'Spamtroll: API returned error for registration scan: ' . $response->error );
 				return $errors;
 			}
 
-			$score  = $response->get_spam_score();
+			$score  = $response->getSpamScore();
 			$status = $this->determine_status( $score );
 			$action = $this->determine_action( $score );
 
@@ -184,9 +184,9 @@ class Spamtroll_Scanner {
 					'ip_address'        => $ip,
 					'status'            => $status,
 					'spam_score'        => $score,
-					'raw_score'         => $response->get_raw_spam_score(),
-					'symbols'           => $response->get_symbols(),
-					'threat_categories' => $response->get_threat_categories(),
+					'raw_score'         => $response->getRawSpamScore(),
+					'symbols'           => $response->getSymbols(),
+					'threat_categories' => $response->getThreatCategories(),
 					'action_taken'      => $action,
 					'content_preview'   => $content,
 				)
@@ -195,7 +195,7 @@ class Spamtroll_Scanner {
 			if ( 'block' === $action ) {
 				$errors->add( 'spamtroll_blocked', __( 'Registration blocked by spam filter. Please contact the site administrator if you believe this is an error.', 'spamtroll' ) );
 			}
-		} catch ( Spamtroll_Api_Exception $e ) {
+		} catch ( \Spamtroll\Sdk\Exception\SpamtrollException $e ) {
 			// Fail-open: allow registration on any API error.
 			error_log( 'Spamtroll: API exception during registration scan: ' . $e->getMessage() );
 		} catch ( Exception $e ) {
@@ -214,22 +214,20 @@ class Spamtroll_Scanner {
 	 *
 	 * Only caches successful API calls — errors fall straight through so
 	 * we don't lock in a bad verdict.
-	 *
-	 * @param Spamtroll_Api_Client $client
-	 * @param string $content
-	 * @param string $source
-	 * @param string $ip
-	 * @param string $username
-	 * @param string $email
-	 * @return Spamtroll_Api_Response
 	 */
-	private function scan_with_cache( $client, $content, $source, $ip, $username, $email ) {
+	private function scan_with_cache( \Spamtroll\Sdk\Client $client, string $content, string $source, string $ip, string $username, string $email ): \Spamtroll\Sdk\Response\CheckSpamResponse {
 		$cache_key = 'spamtroll_scan_' . md5( $source . '|' . $email . '|' . trim( $content ) );
 		$cached    = get_transient( $cache_key );
-		if ( $cached instanceof Spamtroll_Api_Response && $cached->success ) {
+		if ( $cached instanceof \Spamtroll\Sdk\Response\CheckSpamResponse && $cached->success ) {
 			return $cached;
 		}
-		$response = $client->check_spam( $content, $source, $ip, $username, $email );
+		$response = $client->checkSpam( new \Spamtroll\Sdk\Request\CheckSpamRequest(
+			$content,
+			$source,
+			$ip !== '' ? $ip : null,
+			$username !== '' ? $username : null,
+			$email !== '' ? $email : null
+		) );
 		if ( $response->success ) {
 			set_transient( $cache_key, $response, HOUR_IN_SECONDS );
 		}

@@ -149,8 +149,8 @@ class Spamtroll_Admin {
 		}
 
 		// Pin the things nobody asked to customize.
-		$sanitized['api_url']            = Spamtroll_Api_Client::API_BASE_URL;
-		$sanitized['timeout']            = Spamtroll_Api_Client::DEFAULT_TIMEOUT;
+		$sanitized['api_url']            = \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL;
+		$sanitized['timeout']            = \Spamtroll\Sdk\ClientConfig::DEFAULT_TIMEOUT;
 		$sanitized['action_blocked']     = 'block';
 		$sanitized['action_suspicious']  = 'moderate';
 		$sanitized['log_retention_days'] = 30;
@@ -204,15 +204,15 @@ class Spamtroll_Admin {
 		}
 
 		try {
-			$client   = new Spamtroll_Api_Client();
-			$response = $client->test_connection();
+			$client   = Spamtroll_Sdk_Factory::client();
+			$response = $client->testConnection();
 
-			if ( $response->is_connection_valid() ) {
+			if ( $response->isConnectionValid() ) {
 				wp_send_json_success( array( 'message' => __( 'Connection successful! API is reachable.', 'spamtroll' ) ) );
 			} else {
 				wp_send_json_error( array( 'message' => $response->error ? $response->error : __( 'API returned an unexpected response.', 'spamtroll' ) ) );
 			}
-		} catch ( Spamtroll_Api_Exception $e ) {
+		} catch ( \Spamtroll\Sdk\Exception\SpamtrollException $e ) {
 			wp_send_json_error( array( 'message' => $e->getMessage() ) );
 		}
 	}
