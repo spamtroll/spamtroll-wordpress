@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- PHPStan level 9 with `szepeviktor/phpstan-wordpress` stubs. Source
+  is fully clean (0 baseline entries). Memory bumped to 1G because
+  the WP stub set is large.
+- php-cs-fixer config (`.php-cs-fixer.php`) — PSR-12 hybrid that
+  preserves WordPress's snake_case method names while enforcing
+  4-space indent, ordered imports, and `declare(strict_types=1)`.
+- Pest 2 test suite under `tests/Unit/` with Brain Monkey mocking WP
+  globals and Mockery for class doubles. 15 tests covering
+  `Spamtroll_Settings` (typed accessors), `Spamtroll_Sdk_Factory`,
+  and `Spamtroll_Wp_Http_Client` (timeout vs connection mapping).
+- peck spell-check with `peck.json` dictionary covering WP terms
+  (wpdb, nonce, transient, kses, …) and SDK domain words.
+- New `Spamtroll_Settings` typed wrapper around `get_option()`. Every
+  read now goes through `Spamtroll_Settings::string|int|float|bool|stringList`
+  — `get_option()` return type (`mixed`) is narrowed once instead of
+  re-narrowing at each call site.
+- Composer scripts: `test`, `test:coverage`, `lint`, `lint:fix`,
+  `stan`, `peck`, `qa` (composite).
+- New `.github/workflows/qa.yml` — test matrix (PHP 8.2/8.3/8.4) + qa
+  job (PHPStan + cs-fixer dry-run + peck on PHP 8.3). Repo previously
+  had no CI.
+- Documentation under `docs/CONTRIBUTING.md`.
+
+### Changed
+
+- All five `includes/*.php` classes received explicit type hints on
+  public methods. Previously ~2% of methods had types; now all do.
+  Includes generic-typed arrays in PHPDoc (`array<string, mixed>`).
+- `Spamtroll_Scanner` now uses `match` for the action → approval
+  status mapping in `filter_comment_approved`, and pulls every
+  setting through the typed `Spamtroll_Settings` helper.
+- `Spamtroll_Logger::log` parameter changed from untyped to
+  `array<string, mixed>`. `cleanup` and `get_log` typed too.
+- `Spamtroll_Admin::sanitize_settings` accepts `array|mixed` (because
+  `register_setting` may pass non-array values) and narrows
+  internally.
+- `composer.json` requires PHP 8.0+ in production but pins
+  `config.platform.php = 8.3` for development tooling. Pest 2 needs
+  8.2+ transitively, peck needs 8.3+; production runtime unchanged.
+
 ### Changed
 - API client extracted to the shared `spamtroll/php-sdk` Composer package.
   `Spamtroll_Api_Client`, `Spamtroll_Api_Response`, and

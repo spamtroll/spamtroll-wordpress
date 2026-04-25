@@ -1,0 +1,12 @@
+parameters:
+    level: 9
+    paths:
+        - includes
+        - spamtroll.php
+        - uninstall.php
+    bootstrapFiles:
+        - vendor/autoload.php
+        - phpstan-bootstrap.php
+    treatPhpDocTypesAsCertain: false
+    reportUnmatchedIgnoredErrors: true
+    tmpDir: .phpstan-cache

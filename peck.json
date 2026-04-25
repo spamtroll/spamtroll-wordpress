@@ -1,0 +1,52 @@
+{
+    "preset": "base",
+    "ignore": {
+        "words": [
+            "php",
+            "wp",
+            "wpdb",
+            "wpdkk",
+            "wordpress",
+            "spamtroll",
+            "submission",
+            "denominator",
+            "throwable",
+            "retryable",
+            "exponential",
+            "backoff",
+            "envelope",
+            "permalink",
+            "sanitize",
+            "sanitises",
+            "sanitises'",
+            "kses",
+            "metabox",
+            "transient",
+            "transients",
+            "nonce",
+            "nonces",
+            "wpautop",
+            "preg",
+            "absint",
+            "checkspam",
+            "spamtroll's",
+            "ajax",
+            "subsubsub",
+            "tablenav",
+            "psr",
+            "phpstan",
+            "phpdoc",
+            "narrowing",
+            "fakehttpclient",
+            "checkspamrequest",
+            "ext",
+            "curl"
+        ],
+        "paths": [
+            "vendor",
+            "languages",
+            "assets",
+            ".phpstan-cache"
+        ]
+    }
+}

@@ -13,3 +13,9 @@ Thumbs.db
 # Composer
 /vendor/
 /composer.lock
+
+# Tooling caches
+/.php-cs-fixer.cache
+/.phpstan-cache/
+/.phpunit.cache/
+/.peck.cache

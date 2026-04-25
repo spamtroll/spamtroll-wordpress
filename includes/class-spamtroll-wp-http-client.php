@@ -1,4 +1,6 @@
 <?php
+
+declare(strict_types=1);
 /**
  * Spamtroll SDK HTTP adapter for WordPress.
  *
@@ -9,8 +11,8 @@
  * @package Spamtroll
  */
 
-if ( ! defined( 'ABSPATH' ) ) {
-	exit;
+if (! defined('ABSPATH')) {
+    exit;
 }
 
 use Spamtroll\Sdk\Exception\ConnectionException;
@@ -18,34 +20,35 @@ use Spamtroll\Sdk\Exception\TimeoutException;
 use Spamtroll\Sdk\Http\HttpClientInterface;
 use Spamtroll\Sdk\Http\HttpResponse;
 
-class Spamtroll_Wp_Http_Client implements HttpClientInterface {
+class Spamtroll_Wp_Http_Client implements HttpClientInterface
+{
+    public function send(string $method, string $url, array $headers, ?string $body, int $timeout): HttpResponse
+    {
+        $args = [
+            'method' => $method,
+            'timeout' => $timeout,
+            'sslverify' => true,
+            'headers' => $headers,
+        ];
 
-	public function send( string $method, string $url, array $headers, ?string $body, int $timeout ): HttpResponse {
-		$args = array(
-			'method'    => $method,
-			'timeout'   => $timeout,
-			'sslverify' => true,
-			'headers'   => $headers,
-		);
+        if ('POST' === $method && null !== $body) {
+            $args['body'] = $body;
+        }
 
-		if ( 'POST' === $method && null !== $body ) {
-			$args['body'] = $body;
-		}
+        $response = wp_remote_request($url, $args);
 
-		$response = wp_remote_request( $url, $args );
+        if (is_wp_error($response)) {
+            $message = $response->get_error_message();
+            $lower = strtolower($message);
+            if (str_contains($lower, 'timed out') || str_contains($lower, 'timeout')) {
+                throw TimeoutException::afterSeconds($timeout);
+            }
+            throw ConnectionException::fromMessage($message);
+        }
 
-		if ( is_wp_error( $response ) ) {
-			$message = $response->get_error_message();
-			$lower   = strtolower( $message );
-			if ( false !== strpos( $lower, 'timed out' ) || false !== strpos( $lower, 'timeout' ) ) {
-				throw TimeoutException::afterSeconds( $timeout );
-			}
-			throw ConnectionException::fromMessage( $message );
-		}
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $raw = (string) wp_remote_retrieve_body($response);
 
-		$status = (int) wp_remote_retrieve_response_code( $response );
-		$raw    = (string) wp_remote_retrieve_body( $response );
-
-		return new HttpResponse( $status, $raw, array() );
-	}
+        return new HttpResponse($status, $raw, []);
+    }
 }
