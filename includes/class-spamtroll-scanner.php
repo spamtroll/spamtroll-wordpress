@@ -82,6 +82,15 @@ class Spamtroll_Scanner
 
             $response = $this->scan_with_cache($client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_COMMENT, $ip, $username, $email);
 
+            // Quota exhausted — record locally for the admin dashboard,
+            // then fail open. The SDK never throws on 402; we intentionally
+            // do NOT block the comment because the user is on a free /
+            // capped plan, not because the comment looks like spam.
+            if ($this->is_quota_exceeded($response)) {
+                self::record_skipped_quota($response);
+                return $commentdata;
+            }
+
             if (! $response->success) {
                 error_log('Spamtroll: API returned error for comment scan: ' . ($response->error ?? '?'));
                 return $commentdata;
@@ -175,6 +184,11 @@ class Spamtroll_Scanner
 
             $response = $this->scan_with_cache($client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_REGISTRATION, $ip, $sanitized_user_login, $user_email);
 
+            if ($this->is_quota_exceeded($response)) {
+                self::record_skipped_quota($response);
+                return $errors;
+            }
+
             if (! $response->success) {
                 error_log('Spamtroll: API returned error for registration scan: ' . ($response->error ?? '?'));
                 return $errors;
@@ -245,6 +259,108 @@ class Spamtroll_Scanner
             set_transient($cache_key, $response, HOUR_IN_SECONDS);
         }
         return $response;
+    }
+
+    /**
+     * True when the API returned 402 — the account ran out of daily
+     * scans and is on a free / capped plan. Detected purely by status
+     * code so this works with both the current SDK release (0.9.2)
+     * and the unreleased one that adds isQuotaExceeded(). When the
+     * SDK ships 0.9.3 the wasSkipped() method will be the cleaner
+     * call; the httpCode check stays as a belt-and-braces fallback.
+     */
+    private function is_quota_exceeded(\Spamtroll\Sdk\Response\CheckSpamResponse $response): bool
+    {
+        if (method_exists($response, 'isQuotaExceeded')) {
+            /** @phpstan-ignore-next-line older SDK installs don't have this method */
+            if ($response->isQuotaExceeded() === true) {
+                return true;
+            }
+        }
+        return $response->httpCode === 402;
+    }
+
+    /**
+     * Record a quota-exhausted scan in the rolling 30-day local log
+     * so the plugin's admin dashboard can show "X messages were left
+     * unscanned because you hit your daily limit — upgrade your plan".
+     * Storage: a single wp_options entry keyed `spamtroll_quota_skipped_log`,
+     * shape `[ "YYYY-MM-DD" => count, … ]` plus a `last_usage` block.
+     * Pruned to 30 days on each write so the option never grows
+     * unbounded.
+     */
+    public static function record_skipped_quota(\Spamtroll\Sdk\Response\CheckSpamResponse $response): void
+    {
+        $today = gmdate('Y-m-d');
+        $stored = get_option('spamtroll_quota_skipped_log', []);
+        if (! is_array($stored)) {
+            $stored = [];
+        }
+
+        $byDay = isset($stored['days']) && is_array($stored['days']) ? $stored['days'] : [];
+        $byDay[ $today ] = (isset($byDay[ $today ]) && is_int($byDay[ $today ])) ? $byDay[ $today ] + 1 : 1;
+
+        // Prune to last 30 days.
+        $cutoff = gmdate('Y-m-d', strtotime('-30 days'));
+        foreach (array_keys($byDay) as $day) {
+            if (! is_string($day) || $day < $cutoff) {
+                unset($byDay[ $day ]);
+            }
+        }
+
+        $usage = [];
+        if (method_exists($response, 'getQuotaUsage')) {
+            /** @phpstan-ignore-next-line older SDK installs don't have this method */
+            $usage = $response->getQuotaUsage();
+        }
+
+        update_option('spamtroll_quota_skipped_log', [
+            'days' => $byDay,
+            'last_at' => time(),
+            'last_usage' => is_array($usage) ? $usage : [],
+        ], false);
+    }
+
+    /**
+     * Stats for the admin dashboard panel. Returns the day-by-day
+     * skipped count for the last $days days plus the most recent
+     * usage block reported by the API. Always returns a populated
+     * shape — empty arrays when nothing has been recorded yet.
+     *
+     * @return array{total: int, today: int, days: array<string,int>, last_usage: array<string,mixed>, last_at: int}
+     */
+    public static function get_skipped_quota_stats(int $days = 7): array
+    {
+        $stored = get_option('spamtroll_quota_skipped_log', []);
+        if (! is_array($stored)) {
+            $stored = [];
+        }
+        $byDay = isset($stored['days']) && is_array($stored['days']) ? $stored['days'] : [];
+
+        $cutoff = gmdate('Y-m-d', strtotime('-' . max(1, $days) . ' days'));
+        $window = [];
+        $total = 0;
+        foreach ($byDay as $day => $count) {
+            if (! is_string($day) || ! is_int($count)) {
+                continue;
+            }
+            if ($day < $cutoff) {
+                continue;
+            }
+            $window[ $day ] = $count;
+            $total += $count;
+        }
+
+        $today = gmdate('Y-m-d');
+        $todayCount = isset($byDay[ $today ]) && is_int($byDay[ $today ]) ? $byDay[ $today ] : 0;
+
+        return [
+            'total' => $total,
+            'today' => $todayCount,
+            'days' => $window,
+            'last_usage' => isset($stored['last_usage']) && is_array($stored['last_usage']) ? $stored['last_usage'] : [],
+            'last_at' => isset($stored['last_at']) && is_int($stored['last_at']) ? $stored['last_at'] : 0,
+        ];
     }
 
     /**

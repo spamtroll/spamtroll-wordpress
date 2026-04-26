@@ -451,9 +451,24 @@ class Spamtroll_Admin
         if (! current_user_can('manage_options')) {
             return;
         }
+
+        // WordPress only auto-renders settings_errors() on the
+        // options-*.php pages (Settings → ...). Custom top-level admin
+        // pages have to print them manually, otherwise the user gets
+        // no "Settings saved." feedback after submitting the form.
+        if (isset($_GET['settings-updated'])) {
+            add_settings_error(
+                'spamtroll_settings_group',
+                'spamtroll_settings_saved',
+                __('Settings saved.', 'spamtroll'),
+                'updated',
+            );
+        }
+        settings_errors('spamtroll_settings_group');
         ?>
 		<div class="wrap">
 			<h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+			<?php $this->render_quota_skipped_panel(); ?>
 			<form method="post" action="options.php">
 				<?php
                 settings_fields('spamtroll_settings_group');
@@ -461,6 +476,77 @@ class Spamtroll_Admin
         submit_button();
         ?>
 			</form>
+		</div>
+		<?php
+    }
+
+    /**
+     * Render the "messages skipped due to quota" callout. Only shown
+     * when there's at least one skipped scan in the trailing 7 days,
+     * so users on a healthy plan don't see noise. Sources its data
+     * from the rolling local log Spamtroll_Scanner writes on every
+     * 402 response from the API — no extra HTTP needed.
+     */
+    private function render_quota_skipped_panel(): void
+    {
+        $stats = Spamtroll_Scanner::get_skipped_quota_stats(7);
+        if ($stats['total'] === 0) {
+            return;
+        }
+
+        $usage = $stats['last_usage'];
+        $current = isset($usage['current']) && is_numeric($usage['current']) ? (int) $usage['current'] : 0;
+        $limit = isset($usage['limit']) && is_numeric($usage['limit']) ? (int) $usage['limit'] : 0;
+        $plan = isset($usage['plan']) && is_string($usage['plan']) ? $usage['plan'] : 'free';
+
+        $upgrade_url = 'https://spamtroll.io/dashboard/billing';
+
+        ?>
+		<div class="notice notice-warning" style="margin: 16px 0; padding: 16px;">
+			<h3 style="margin-top: 0;">
+				<?php esc_html_e('Some messages were not scanned — daily quota reached', 'spamtroll'); ?>
+			</h3>
+			<p>
+				<?php
+                /* translators: %1$d: count of skipped scans, %2$d: window in days */
+                printf(
+                    esc_html__(
+                        'In the last %2$d days, %1$d incoming messages were allowed through without spam scanning because your Spamtroll daily quota was exhausted. They were not blocked — but they were not checked either.',
+                        'spamtroll',
+                    ),
+                    (int) $stats['total'],
+                    7,
+                );
+                ?>
+			</p>
+			<?php if ($limit > 0) : ?>
+				<p>
+					<?php
+                    /* translators: %1$d current, %2$d limit, %3$s plan name */
+                    printf(
+                        esc_html__('Last reading from API: %1$d / %2$d scans on the %3$s plan.', 'spamtroll'),
+                        $current,
+                        $limit,
+                        esc_html($plan),
+                    );
+                    ?>
+				</p>
+			<?php endif; ?>
+			<p>
+				<a class="button button-primary" href="<?php echo esc_url($upgrade_url); ?>" target="_blank" rel="noopener">
+					<?php esc_html_e('Upgrade your plan', 'spamtroll'); ?>
+				</a>
+			</p>
+			<?php if ($stats['days'] !== []) : ?>
+				<details style="margin-top: 8px;">
+					<summary><?php esc_html_e('Per-day breakdown', 'spamtroll'); ?></summary>
+					<ul style="margin: 8px 0 0 24px;">
+						<?php foreach ($stats['days'] as $day => $count) : ?>
+							<li><?php echo esc_html($day . ' — ' . $count); ?></li>
+						<?php endforeach; ?>
+					</ul>
+				</details>
+			<?php endif; ?>
 		</div>
 		<?php
     }

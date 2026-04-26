@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Plugin Name: Spamtroll Anti-Spam
  * Plugin URI:  https://spamtroll.io
  * Description: Real-time spam detection for comments and registrations powered by the Spamtroll API.
- * Version:     0.1.0
+ * Version:     0.1.1
  * Author:      Spamtroll
  * Author URI:  https://spamtroll.io
  * License:     MIT
@@ -25,7 +25,7 @@ if (! defined('ABSPATH')) {
 /**
  * Plugin version.
  */
-define('SPAMTROLL_VERSION', '0.1.0');
+define('SPAMTROLL_VERSION', '0.1.1');
 
 /**
  * Plugin directory path (with trailing slash).

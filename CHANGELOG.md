@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Quota-aware fail-open** — when the Spamtroll API returns HTTP 402 / `QUOTA_EXCEEDED`, the comment / registration check no longer blocks the content. The message is allowed through unscanned (the user's account ran out of daily scans, not because the content looks like spam) and the event is recorded in a rolling 30-day local log stored in `wp_options['spamtroll_quota_skipped_log']`. Detection is by HTTP status code so this works with both the current SDK release (0.9.2) and the unreleased `isQuotaExceeded()` API.
+- **Admin notice on the Spamtroll settings page** that summarises quota-skipped messages from the last 7 days, the most recent usage block returned by the API (`current / limit / plan`), an "Upgrade your plan" CTA, and an expandable per-day breakdown. Only shown when there's at least one skipped scan in the window so a healthy account sees nothing.
+- `Spamtroll_Scanner::record_skipped_quota()` and `get_skipped_quota_stats($days)` — public helpers used by both the scanner hook and the admin renderer.
+
+### Fixed
+
+- Settings page now displays the "Settings saved." admin notice after
+  the form is submitted. Custom top-level admin menus don't get the
+  notice rendered automatically (only `options-*.php` pages do), so we
+  call `settings_errors()` explicitly and seed it from the
+  `settings-updated` query flag.
+
+### Added
 
 - PHPStan level 9 with `szepeviktor/phpstan-wordpress` stubs. Source
   is fully clean (0 baseline entries). Memory bumped to 1G because
