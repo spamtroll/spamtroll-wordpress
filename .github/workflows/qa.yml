@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test / PHP ${{ matrix.php }}
@@ -13,6 +20,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Matches the plugin header, composer.json's `require.php` and
+        # `config.platform.php`. All four have to agree, and
+        # tests/Regression/PhpBaselineTest.php fails the build if they drift.
         php: ['8.2', '8.3', '8.4']
     steps:
       - uses: actions/checkout@v4
@@ -31,16 +41,49 @@ jobs:
       - name: Run tests
         run: vendor/bin/pest --colors=always
 
+  regression-proof:
+    name: Regression proof
+    runs-on: ubuntu-latest
+    # Only meaningful on a branch: it compares the working tree against main.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The proof reads the base revision's files out of git history.
+          fetch-depth: 0
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        uses: ramsey/composer-install@v3
+
+      # Two claims, both of which have to hold: the regression suite is red
+      # against the base branch (so it measures the fix, not the harness), and
+      # the fail-open gate is green against it (so the fix did not buy its
+      # behaviour by giving fail-open up).
+      - name: Prove the regression tests fail on the base branch
+        env:
+          # Through the environment, not string interpolation: a ref reaches
+          # the shell as data that way, whatever it happens to contain.
+          BASE_REF: ${{ github.base_ref }}
+        run: bash dev/prove-regression.sh "origin/${BASE_REF}"
+
   qa:
     name: Quality (PHPStan + cs-fixer + peck)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up PHP 8.3
+      - name: Set up PHP 8.2
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3'
+          php-version: '8.2'
           extensions: curl, json, mbstring
           coverage: none
           tools: composer:v2
@@ -59,3 +102,34 @@ jobs:
 
       - name: Peck (spell check)
         run: composer peck
+
+  package:
+    name: Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring
+          coverage: none
+          tools: composer:v2
+
+      # A WordPress plugin is distributed as a ZIP that runs when unzipped.
+      # This one refuses to load without vendor/, and vendor/ is gitignored,
+      # so a ZIP taken from GitHub's "Download source" button has never
+      # worked. Building the real artifact here means the packaging is
+      # exercised on every commit rather than discovered at release time.
+      - name: Build the distributable ZIP
+        run: bash dev/build-zip.sh
+
+      - name: Verify the ZIP is loadable
+        run: bash dev/verify-zip.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spamtroll-wordpress
+          path: build/spamtroll.zip
+          if-no-files-found: error
