@@ -26,6 +26,10 @@
 				data: {
 					action: 'spamtroll_test_connection',
 					nonce: spamtrollAdmin.nonce,
+					// The key in the box, not the one in the database: the
+					// whole point of the button is to check a key before
+					// committing to it.
+					api_key: $('#spamtroll-api-key').val() || '',
 				},
 				success: function (response) {
 					$result.removeClass('spamtroll-testing');

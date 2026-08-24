@@ -1,4 +1,6 @@
 <?php
+
+declare(strict_types=1);
 /**
  * Spamtroll Admin
  *
@@ -17,6 +19,25 @@ if (! defined('ABSPATH')) {
 class Spamtroll_Admin
 {
     /**
+     * Prefix of the placeholder shown in place of a saved API key.
+     */
+    public const MASK_MARKER = '••••';
+
+    /**
+     * A saved API key as something safe to render.
+     *
+     * Returns an empty string when nothing is stored, so a first-time setup
+     * still gets an empty box to type into.
+     */
+    public static function mask(string $key): string
+    {
+        if ('' === $key) {
+            return '';
+        }
+        return self::MASK_MARKER . substr($key, -4);
+    }
+
+    /**
      * Initialize admin hooks.
      */
     public function init(): void
@@ -26,6 +47,10 @@ class Spamtroll_Admin
         add_action('admin_enqueue_scripts', [ $this, 'enqueue_assets' ]);
         add_action('wp_ajax_spamtroll_test_connection', [ $this, 'ajax_test_connection' ]);
         add_filter('plugin_action_links_' . SPAMTROLL_PLUGIN_BASENAME, [ $this, 'plugin_action_links' ]);
+
+        // A plugin that has quietly stopped protecting the site has to say
+        // so somewhere the administrator actually looks.
+        (new Spamtroll_Health())->init();
     }
 
     /**
@@ -106,6 +131,24 @@ class Spamtroll_Admin
         );
 
         add_settings_field('bypass_roles', __('Bypass Roles', 'spamtroll'), [ $this, 'render_field_bypass_roles' ], 'spamtroll', 'spamtroll_bypass');
+
+        // Advanced section. Small, but every field here was previously
+        // rendered nowhere and pinned to a constant on save — which meant a
+        // self-hosted or staging instance could not be pointed at, and an
+        // operator who had once set a custom URL had it wiped the first time
+        // they pressed Save.
+        add_settings_section(
+            'spamtroll_advanced',
+            __('Advanced', 'spamtroll'),
+            [ $this, 'render_section_advanced' ],
+            'spamtroll',
+        );
+
+        add_settings_field('api_url', __('API URL', 'spamtroll'), [ $this, 'render_field_api_url' ], 'spamtroll', 'spamtroll_advanced');
+        add_settings_field('timeout', __('Latency budget (seconds)', 'spamtroll'), [ $this, 'render_field_timeout' ], 'spamtroll', 'spamtroll_advanced');
+        add_settings_field('trust_proxy', __('Behind a proxy or CDN', 'spamtroll'), [ $this, 'render_field_trust_proxy' ], 'spamtroll', 'spamtroll_advanced');
+        add_settings_field('send_feedback', __('Send moderator feedback', 'spamtroll'), [ $this, 'render_field_send_feedback' ], 'spamtroll', 'spamtroll_advanced');
+        add_settings_field('log_retention_days', __('Log Retention (days)', 'spamtroll'), [ $this, 'render_field_log_retention_days' ], 'spamtroll', 'spamtroll_advanced');
     }
 
     /**
@@ -122,51 +165,76 @@ class Spamtroll_Admin
         }
         $sanitized = [];
 
+        $stored = Spamtroll_Settings::all();
+
         $sanitized['enabled'] = ! empty($input['enabled']) ? 1 : 0;
-        $sanitized['api_key'] = isset($input['api_key']) && is_scalar($input['api_key']) ? sanitize_text_field((string) $input['api_key']) : '';
         $sanitized['check_comments'] = ! empty($input['check_comments']) ? 1 : 0;
         $sanitized['check_registrations'] = ! empty($input['check_registrations']) ? 1 : 0;
+        $sanitized['send_feedback'] = ! empty($input['send_feedback']) ? 1 : 0;
+        $sanitized['trust_proxy'] = ! empty($input['trust_proxy']) ? 1 : 0;
 
-        // Sensitivity preset replaces the two numeric thresholds. Map
-        // to the underlying 0.0-1.0 values the scanner uses internally
-        // so we don't have to touch Spamtroll_Scanner::determine_*.
+        // The key field renders as a mask once one is saved, so an untouched
+        // form posts the mask back. Treat that — and an empty box — as "leave
+        // what is stored alone"; only a real value replaces the key.
+        $submitted_key = isset($input['api_key']) && is_scalar($input['api_key'])
+            ? sanitize_text_field((string) $input['api_key'])
+            : '';
+        $stored_key = isset($stored['api_key']) && is_scalar($stored['api_key']) ? (string) $stored['api_key'] : '';
+        $sanitized['api_key'] = ('' === $submitted_key || self::mask($stored_key) === $submitted_key)
+            ? $stored_key
+            : $submitted_key;
+
+        // Sensitivity selects a column of Spamtroll_Action_Map's table. It no
+        // longer maps to numeric thresholds, because the plugin no longer
+        // re-derives the verdict — the backend's `status` decides, and this
+        // only says how borderline content is treated.
         $sensitivity = isset($input['sensitivity']) && is_string($input['sensitivity'])
             ? $input['sensitivity']
-            : 'balanced';
-        if (! in_array($sensitivity, [ 'lenient', 'balanced', 'strict' ], true)) {
-            $sensitivity = 'balanced';
-        }
-        $sanitized['sensitivity'] = $sensitivity;
-        switch ($sensitivity) {
-            case 'strict':
-                $sanitized['spam_threshold'] = 0.50;
-                $sanitized['suspicious_threshold'] = 0.30;
-                break;
-            case 'lenient':
-                $sanitized['spam_threshold'] = 0.85;
-                $sanitized['suspicious_threshold'] = 0.60;
-                break;
-            case 'balanced':
-            default:
-                $sanitized['spam_threshold'] = 0.70;
-                $sanitized['suspicious_threshold'] = 0.40;
-                break;
+            : Spamtroll_Action_Map::PRESET_BALANCED;
+        $sanitized['sensitivity'] = in_array($sensitivity, Spamtroll_Action_Map::presets(), true)
+            ? $sensitivity
+            : Spamtroll_Action_Map::PRESET_BALANCED;
+
+        $sanitized['api_url'] = isset($input['api_url']) && is_scalar($input['api_url'])
+            ? esc_url_raw(trim((string) $input['api_url']))
+            : \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL;
+        if ('' === $sanitized['api_url']) {
+            $sanitized['api_url'] = \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL;
         }
 
-        // Pin the things nobody asked to customize.
-        $sanitized['api_url'] = \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL;
-        $sanitized['timeout'] = \Spamtroll\Sdk\ClientConfig::DEFAULT_TIMEOUT;
-        $sanitized['action_blocked'] = 'block';
-        $sanitized['action_suspicious'] = 'moderate';
-        $sanitized['log_retention_days'] = 30;
+        $sanitized['timeout'] = max(
+            Spamtroll_Settings::MIN_TIMEOUT,
+            min(
+                Spamtroll_Settings::MAX_TIMEOUT,
+                isset($input['timeout']) && is_numeric($input['timeout'])
+                    ? (int) $input['timeout']
+                    : Spamtroll_Settings::DEFAULT_TIMEOUT,
+            ),
+        );
 
-        // Bypass roles — only allow valid WordPress roles.
+        $sanitized['log_retention_days'] = max(
+            Spamtroll_Settings::MIN_RETENTION_DAYS,
+            min(
+                Spamtroll_Settings::MAX_RETENTION_DAYS,
+                isset($input['log_retention_days']) && is_numeric($input['log_retention_days'])
+                    ? (int) $input['log_retention_days']
+                    : Spamtroll_Settings::DEFAULT_RETENTION_DAYS,
+            ),
+        );
+
+        // Bypass roles. An administrator who unticks every role means it:
+        // the submitted-but-empty case has to survive, so the key is always
+        // written and the defaults only apply on a first save.
         $valid_roles = array_keys(wp_roles()->roles);
         if (isset($input['bypass_roles']) && is_array($input['bypass_roles'])) {
             $bypass = array_values(array_filter($input['bypass_roles'], 'is_string'));
             $sanitized['bypass_roles'] = array_values(array_intersect($bypass, $valid_roles));
+        } elseif (array_key_exists('bypass_roles', $stored)) {
+            // The checkboxes are on the form; a POST without them means every
+            // box was cleared, not that the section was never rendered.
+            $sanitized['bypass_roles'] = [];
         } else {
-            $sanitized['bypass_roles'] = [ 'administrator', 'editor' ];
+            $sanitized['bypass_roles'] = Spamtroll_Settings::DEFAULT_BYPASS_ROLES;
         }
 
         return $sanitized;
@@ -206,17 +274,32 @@ class Spamtroll_Admin
             wp_send_json_error([ 'message' => __('Permission denied.', 'spamtroll') ]);
         }
 
+        // Test the key in the form, not the one in the database. Pasting a
+        // fresh key and pressing the button used to report on the old one,
+        // which is the one answer the button must never give.
+        $posted = isset($_POST['api_key']) && is_scalar($_POST['api_key'])
+            ? sanitize_text_field(wp_unslash((string) $_POST['api_key']))
+            : '';
+        $override = ('' !== $posted && self::MASK_MARKER !== substr($posted, 0, strlen(self::MASK_MARKER))) ? $posted : null;
+
         try {
-            $client = Spamtroll_Sdk_Factory::client();
-            $response = $client->testConnection();
+            $response = Spamtroll_Sdk_Factory::client($override)->testConnection();
 
             if ($response->isConnectionValid()) {
+                // An operator getting an answer is the clearest possible
+                // signal that whatever was wrong has stopped being wrong.
+                (new Spamtroll_Circuit_Breaker())->reset();
+                Spamtroll_Health::record_success();
                 wp_send_json_success([ 'message' => __('Connection successful! API is reachable.', 'spamtroll') ]);
-            } else {
-                wp_send_json_error([ 'message' => $response->error ? $response->error : __('API returned an unexpected response.', 'spamtroll') ]);
             }
+
+            wp_send_json_error([ 'message' => $response->error ? $response->error : __('API returned an unexpected response.', 'spamtroll') ]);
         } catch (\Spamtroll\Sdk\Exception\SpamtrollException $e) {
             wp_send_json_error([ 'message' => $e->getMessage() ]);
+        } catch (\Throwable $e) {
+            // Without this the AJAX handler answers an unexpected error with
+            // an empty 500 and the button spins forever.
+            wp_send_json_error([ 'message' => __('Unexpected error while testing the connection.', 'spamtroll') ]);
         }
     }
 
@@ -251,15 +334,7 @@ class Spamtroll_Admin
      */
     public function render_section_detection(): void
     {
-        echo '<p>' . esc_html__('Choose what to scan and configure detection thresholds (0-1 scale, where 1 = definitely spam).', 'spamtroll') . '</p>';
-    }
-
-    /**
-     * Render actions section description.
-     */
-    public function render_section_actions(): void
-    {
-        echo '<p>' . esc_html__('Define what happens when spam or suspicious content is detected.', 'spamtroll') . '</p>';
+        echo '<p>' . esc_html__('Choose what to scan, and how borderline content is treated. The spam verdict itself is decided by the Spamtroll API using the thresholds configured for this platform in your dashboard.', 'spamtroll') . '</p>';
     }
 
     /**
@@ -271,11 +346,11 @@ class Spamtroll_Admin
     }
 
     /**
-     * Render maintenance section description.
+     * Render advanced section description.
      */
-    public function render_section_maintenance(): void
+    public function render_section_advanced(): void
     {
-        echo '<p>' . esc_html__('Configure log retention and cleanup settings.', 'spamtroll') . '</p>';
+        echo '<p>' . esc_html__('Defaults suit almost every site. Change these only if you run a self-hosted Spamtroll instance, sit behind a proxy, or need a different log retention period.', 'spamtroll') . '</p>';
     }
 
     // -------------------------------------------------------------------------
@@ -297,8 +372,11 @@ class Spamtroll_Admin
      */
     public function render_field_api_key(): void
     {
-        $value = Spamtroll_Settings::string('api_key');
-        echo '<input type="password" name="spamtroll_settings[api_key]" value="' . esc_attr($value) . '" class="regular-text" autocomplete="off" />';
+        // The key is never printed in full. `type="password"` hides it from
+        // a shoulder, not from View Source, a browser extension, or anything
+        // else that can read the DOM of an admin page.
+        $value = self::mask(Spamtroll_Settings::string('api_key'));
+        echo '<input type="password" id="spamtroll-api-key" name="spamtroll_settings[api_key]" value="' . esc_attr($value) . '" class="regular-text" autocomplete="off" />';
         echo '<p class="description">' . esc_html__('Your Spamtroll API key.', 'spamtroll') . '</p>';
         echo '<p><button type="button" class="button" id="spamtroll-test-connection">' . esc_html__('Test Connection', 'spamtroll') . '</button>';
         echo ' <span id="spamtroll-test-result"></span></p>';
@@ -309,7 +387,7 @@ class Spamtroll_Admin
      */
     public function render_field_api_url(): void
     {
-        $value = Spamtroll_Settings::string('api_url', 'https://api.spamtroll.io/api/v1');
+        $value = Spamtroll_Settings::api_url();
         echo '<input type="url" name="spamtroll_settings[api_url]" value="' . esc_attr($value) . '" class="regular-text" />';
         echo '<p class="description">' . esc_html__('Spamtroll API endpoint URL. Change only if using a self-hosted instance.', 'spamtroll') . '</p>';
     }
@@ -319,9 +397,31 @@ class Spamtroll_Admin
      */
     public function render_field_timeout(): void
     {
-        $value = Spamtroll_Settings::int('timeout', 5);
-        echo '<input type="number" name="spamtroll_settings[timeout]" value="' . esc_attr((string) $value) . '" min="1" max="30" step="1" class="small-text" />';
-        echo '<p class="description">' . esc_html__('API request timeout in seconds (1-30).', 'spamtroll') . '</p>';
+        $value = Spamtroll_Settings::timeout();
+        echo '<input type="number" name="spamtroll_settings[timeout]" value="' . esc_attr((string) $value) . '" min="' . esc_attr((string) Spamtroll_Settings::MIN_TIMEOUT) . '" max="' . esc_attr((string) Spamtroll_Settings::MAX_TIMEOUT) . '" step="1" class="small-text" />';
+        echo '<p class="description">' . esc_html__('Longest a visitor may wait for the whole spam check, retries included. When the budget runs out the content is allowed through unscanned.', 'spamtroll') . '</p>';
+    }
+
+    /**
+     * Render the trusted-proxy checkbox.
+     */
+    public function render_field_trust_proxy(): void
+    {
+        $value = Spamtroll_Settings::int('trust_proxy', 0);
+        echo '<label><input type="checkbox" name="spamtroll_settings[trust_proxy]" value="1" ' . checked(1, $value, false) . ' /> '
+            . esc_html__('Read the visitor IP from X-Forwarded-For, X-Real-IP or CF-Connecting-IP', 'spamtroll') . '</label>';
+        echo '<p class="description">' . esc_html__('Only tick this if the site really is behind Cloudflare, a load balancer or a reverse proxy. Anyone can send those headers, so on a directly exposed site this would let a spammer choose their own reputation.', 'spamtroll') . '</p>';
+    }
+
+    /**
+     * Render the moderator-feedback checkbox.
+     */
+    public function render_field_send_feedback(): void
+    {
+        $value = Spamtroll_Settings::int('send_feedback', 1);
+        echo '<label><input type="checkbox" name="spamtroll_settings[send_feedback]" value="1" ' . checked(1, $value, false) . ' /> '
+            . esc_html__('Tell Spamtroll when a moderator marks a comment as spam or restores it', 'spamtroll') . '</label>';
+        echo '<p class="description">' . esc_html__('Sends the comment identifier and your verdict — not the comment text — so detection improves for this platform.', 'spamtroll') . '</p>';
     }
 
     /**
@@ -349,12 +449,8 @@ class Spamtroll_Admin
      */
     public function render_field_sensitivity(): void
     {
-        $value = Spamtroll_Settings::string('sensitivity', 'balanced');
-        $options = [
-            'lenient' => __('Lenient — fewer false positives, lets more spam through', 'spamtroll'),
-            'balanced' => __('Balanced (recommended)', 'spamtroll'),
-            'strict' => __('Strict — blocks aggressively, more false positives', 'spamtroll'),
-        ];
+        $value = (new Spamtroll_Action_Map())->preset();
+        $options = Spamtroll_Action_Map::describe();
         echo '<select name="spamtroll_settings[sensitivity]">';
         foreach ($options as $key => $label) {
             echo '<option value="' . esc_attr($key) . '"' . selected($value, $key, false) . '>' . esc_html($label) . '</option>';
@@ -364,58 +460,11 @@ class Spamtroll_Admin
     }
 
     /**
-     * Render spam threshold field.
-     */
-    public function render_field_spam_threshold(): void
-    {
-        $value = Spamtroll_Settings::float('spam_threshold', 0.70);
-        echo '<input type="number" name="spamtroll_settings[spam_threshold]" value="' . esc_attr((string) $value) . '" min="0" max="1" step="0.01" class="small-text" />';
-        echo '<p class="description">' . esc_html__('Score at or above this threshold triggers the spam action (0-1).', 'spamtroll') . '</p>';
-    }
-
-    /**
-     * Render suspicious threshold field.
-     */
-    public function render_field_suspicious_threshold(): void
-    {
-        $value = Spamtroll_Settings::float('suspicious_threshold', 0.40);
-        echo '<input type="number" name="spamtroll_settings[suspicious_threshold]" value="' . esc_attr((string) $value) . '" min="0" max="1" step="0.01" class="small-text" />';
-        echo '<p class="description">' . esc_html__('Score at or above this threshold (but below spam) triggers the suspicious action (0-1).', 'spamtroll') . '</p>';
-    }
-
-    /**
-     * Render action for blocked content.
-     */
-    public function render_field_action_blocked(): void
-    {
-        $value = Spamtroll_Settings::string('action_blocked', 'block');
-        echo '<select name="spamtroll_settings[action_blocked]">';
-        echo '<option value="block" ' . selected('block', $value, false) . '>' . esc_html__('Block (mark as spam)', 'spamtroll') . '</option>';
-        echo '<option value="moderate" ' . selected('moderate', $value, false) . '>' . esc_html__('Send to moderation', 'spamtroll') . '</option>';
-        echo '</select>';
-    }
-
-    /**
-     * Render action for suspicious content.
-     */
-    public function render_field_action_suspicious(): void
-    {
-        $value = Spamtroll_Settings::string('action_suspicious', 'moderate');
-        echo '<select name="spamtroll_settings[action_suspicious]">';
-        echo '<option value="moderate" ' . selected('moderate', $value, false) . '>' . esc_html__('Send to moderation', 'spamtroll') . '</option>';
-        echo '<option value="allow" ' . selected('allow', $value, false) . '>' . esc_html__('Allow (log only)', 'spamtroll') . '</option>';
-        echo '</select>';
-    }
-
-    /**
      * Render bypass roles checkboxes.
      */
     public function render_field_bypass_roles(): void
     {
-        $current = Spamtroll_Settings::stringList('bypass_roles');
-        if ($current === []) {
-            $current = [ 'administrator', 'editor' ];
-        }
+        $current = Spamtroll_Settings::bypass_roles();
         $roles = wp_roles()->roles;
 
         foreach ($roles as $slug => $role) {
@@ -434,9 +483,9 @@ class Spamtroll_Admin
      */
     public function render_field_log_retention_days(): void
     {
-        $value = Spamtroll_Settings::int('log_retention_days', 30);
-        echo '<input type="number" name="spamtroll_settings[log_retention_days]" value="' . esc_attr((string) $value) . '" min="1" max="365" step="1" class="small-text" />';
-        echo '<p class="description">' . esc_html__('Number of days to keep scan logs (1-365).', 'spamtroll') . '</p>';
+        $value = Spamtroll_Settings::retention_days();
+        echo '<input type="number" name="spamtroll_settings[log_retention_days]" value="' . esc_attr((string) $value) . '" min="' . esc_attr((string) Spamtroll_Settings::MIN_RETENTION_DAYS) . '" max="' . esc_attr((string) Spamtroll_Settings::MAX_RETENTION_DAYS) . '" step="1" class="small-text" />';
+        echo '<p class="description">' . esc_html__('How long scan results — including IP and email addresses — are kept before the daily cleanup deletes them (1-365).', 'spamtroll') . '</p>';
     }
 
     // -------------------------------------------------------------------------
@@ -468,6 +517,7 @@ class Spamtroll_Admin
         ?>
 		<div class="wrap">
 			<h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+			<?php $this->render_health_panel(); ?>
 			<?php $this->render_quota_skipped_panel(); ?>
 			<form method="post" action="options.php">
 				<?php
@@ -481,6 +531,37 @@ class Spamtroll_Admin
     }
 
     /**
+     * Render the current API fault, if any, at the top of the settings screen.
+     *
+     * The site-wide notice covers the loud states; this one also shows the
+     * quieter ones — a rate limit, an odd answer — to whoever came looking.
+     */
+    private function render_health_panel(): void
+    {
+        $described = Spamtroll_Health::describe();
+        if (null === $described) {
+            return;
+        }
+
+        $status = Spamtroll_Health::status();
+        $seen = $status['at'] > 0
+            ? sprintf(
+                /* translators: %s: human-readable time difference, e.g. "5 mins" */
+                __('Last seen %s ago.', 'spamtroll'),
+                human_time_diff($status['at']),
+            )
+            : '';
+
+        printf(
+            '<div class="notice notice-%1$s"><p><strong>%2$s</strong></p><p>%3$s</p><p><em>%4$s</em></p></div>',
+            esc_attr($described['severity']),
+            esc_html($described['title']),
+            esc_html($described['body']),
+            esc_html(trim($seen . ' ' . $status['message'])),
+        );
+    }
+
+    /**
      * Render the "messages skipped due to quota" callout. Only shown
      * when there's at least one skipped scan in the trailing 7 days,
      * so users on a healthy plan don't see noise. Sources its data
@@ -490,7 +571,7 @@ class Spamtroll_Admin
     private function render_quota_skipped_panel(): void
     {
         $stats = Spamtroll_Scanner::get_skipped_quota_stats(7);
-        if ($stats['total'] === 0) {
+        if (0 === $stats['total']) {
             return;
         }
 
@@ -499,56 +580,45 @@ class Spamtroll_Admin
         $limit = isset($usage['limit']) && is_numeric($usage['limit']) ? (int) $usage['limit'] : 0;
         $plan = isset($usage['plan']) && is_string($usage['plan']) ? $usage['plan'] : 'free';
 
-        $upgrade_url = 'https://spamtroll.io/dashboard/billing';
+        $summary = sprintf(
+            /* translators: %1$d: count of skipped scans, %2$d: window in days */
+            esc_html__('In the last %2$d days, %1$d incoming messages were allowed through without spam scanning because your Spamtroll daily quota was exhausted. They were not blocked — but they were not checked either.', 'spamtroll'),
+            (int) $stats['total'],
+            7,
+        );
 
-        ?>
-		<div class="notice notice-warning" style="margin: 16px 0; padding: 16px;">
-			<h3 style="margin-top: 0;">
-				<?php esc_html_e('Some messages were not scanned — daily quota reached', 'spamtroll'); ?>
-			</h3>
-			<p>
-				<?php
-                /* translators: %1$d: count of skipped scans, %2$d: window in days */
-                printf(
-                    esc_html__(
-                        'In the last %2$d days, %1$d incoming messages were allowed through without spam scanning because your Spamtroll daily quota was exhausted. They were not blocked — but they were not checked either.',
-                        'spamtroll',
-                    ),
-                    (int) $stats['total'],
-                    7,
-                );
-                ?>
-			</p>
-			<?php if ($limit > 0) : ?>
-				<p>
-					<?php
-                    /* translators: %1$d current, %2$d limit, %3$s plan name */
-                    printf(
-                        esc_html__('Last reading from API: %1$d / %2$d scans on the %3$s plan.', 'spamtroll'),
-                        $current,
-                        $limit,
-                        esc_html($plan),
-                    );
-                    ?>
-				</p>
-			<?php endif; ?>
-			<p>
-				<a class="button button-primary" href="<?php echo esc_url($upgrade_url); ?>" target="_blank" rel="noopener">
-					<?php esc_html_e('Upgrade your plan', 'spamtroll'); ?>
-				</a>
-			</p>
-			<?php if ($stats['days'] !== []) : ?>
-				<details style="margin-top: 8px;">
-					<summary><?php esc_html_e('Per-day breakdown', 'spamtroll'); ?></summary>
-					<ul style="margin: 8px 0 0 24px;">
-						<?php foreach ($stats['days'] as $day => $count) : ?>
-							<li><?php echo esc_html($day . ' — ' . $count); ?></li>
-						<?php endforeach; ?>
-					</ul>
-				</details>
-			<?php endif; ?>
-		</div>
-		<?php
+        $reading = $limit > 0
+            ? sprintf(
+                /* translators: %1$d current, %2$d limit, %3$s plan name */
+                esc_html__('Last reading from API: %1$d / %2$d scans on the %3$s plan.', 'spamtroll'),
+                $current,
+                $limit,
+                esc_html($plan),
+            )
+            : '';
+
+        $breakdown = '';
+        if ([] !== $stats['days']) {
+            $items = '';
+            foreach ($stats['days'] as $day => $count) {
+                $items .= '<li>' . esc_html($day . ' — ' . $count) . '</li>';
+            }
+            $breakdown = '<details style="margin-top:8px;"><summary>'
+                . esc_html__('Per-day breakdown', 'spamtroll')
+                . '</summary><ul style="margin:8px 0 0 24px;">' . $items . '</ul></details>';
+        }
+
+        printf(
+            '<div class="notice notice-warning" style="margin:16px 0;padding:16px;">'
+                . '<h3 style="margin-top:0;">%1$s</h3><p>%2$s</p>%3$s'
+                . '<p><a class="button button-primary" href="%4$s" target="_blank" rel="noopener">%5$s</a></p>%6$s</div>',
+            esc_html__('Some messages were not scanned — daily quota reached', 'spamtroll'),
+            $summary,
+            '' !== $reading ? '<p>' . $reading . '</p>' : '',
+            esc_url('https://spamtroll.io/dashboard/billing'),
+            esc_html__('Upgrade your plan', 'spamtroll'),
+            $breakdown,
+        );
     }
 
     /**
@@ -561,7 +631,10 @@ class Spamtroll_Admin
         }
 
         $status = isset($_GET['status']) && is_string($_GET['status']) ? sanitize_text_field(wp_unslash($_GET['status'])) : '';
-        $paged = isset($_GET['paged']) && is_numeric($_GET['paged']) ? absint($_GET['paged']) : 1;
+        // `?paged=0` used to survive absint() as 0 and reach the query as
+        // OFFSET -20 — a MySQL syntax error, an empty table, and a raw
+        // database message on screen when WP_DEBUG_DISPLAY is on.
+        $paged = isset($_GET['paged']) && is_numeric($_GET['paged']) ? max(1, absint($_GET['paged'])) : 1;
         $per_page = 20;
 
         $result = Spamtroll_Logger::get_recent_logs([
@@ -574,20 +647,18 @@ class Spamtroll_Admin
         $total = $result['total'];
         $total_pages = (int) ceil($total / $per_page);
 
-        // Count per status for filter tabs.
-        $all_result = Spamtroll_Logger::get_recent_logs([ 'per_page' => 1, 'page' => 1 ]);
-        $blocked_result = Spamtroll_Logger::get_recent_logs([ 'status' => 'blocked', 'per_page' => 1, 'page' => 1 ]);
-        $suspicious_result = Spamtroll_Logger::get_recent_logs([ 'status' => 'suspicious', 'per_page' => 1, 'page' => 1 ]);
-        $safe_result = Spamtroll_Logger::get_recent_logs([ 'status' => 'safe', 'per_page' => 1, 'page' => 1 ]);
+        // One GROUP BY for all four filter tabs, where there used to be four
+        // separate COUNT(*) queries on every render.
+        $counts = Spamtroll_Logger::count_by_status();
         ?>
 		<div class="wrap">
 			<h1><?php esc_html_e('Spamtroll Logs', 'spamtroll'); ?></h1>
 
 			<ul class="subsubsub">
-				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs')); ?>" <?php echo empty($status) ? 'class="current"' : ''; ?>><?php esc_html_e('All', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) $all_result['total']); ?>)</span></a> |</li>
-				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=blocked')); ?>" <?php echo 'blocked' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Blocked', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) $blocked_result['total']); ?>)</span></a> |</li>
-				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=suspicious')); ?>" <?php echo 'suspicious' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Suspicious', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) $suspicious_result['total']); ?>)</span></a> |</li>
-				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=safe')); ?>" <?php echo 'safe' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Safe', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) $safe_result['total']); ?>)</span></a></li>
+				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs')); ?>" <?php echo empty($status) ? 'class="current"' : ''; ?>><?php esc_html_e('All', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) $counts['_all']); ?>)</span></a> |</li>
+				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=blocked')); ?>" <?php echo 'blocked' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Blocked', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) ($counts['blocked'] ?? 0)); ?>)</span></a> |</li>
+				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=suspicious')); ?>" <?php echo 'suspicious' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Suspicious', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) ($counts['suspicious'] ?? 0)); ?>)</span></a> |</li>
+				<li><a href="<?php echo esc_url(admin_url('admin.php?page=spamtroll-logs&status=safe')); ?>" <?php echo 'safe' === $status ? 'class="current"' : ''; ?>><?php esc_html_e('Safe', 'spamtroll'); ?> <span class="count">(<?php echo esc_html((string) ($counts['safe'] ?? 0)); ?>)</span></a></li>
 			</ul>
 
 			<table class="wp-list-table widefat fixed striped">
@@ -633,7 +704,7 @@ class Spamtroll_Admin
 					<div class="tablenav-pages">
 						<?php
                         $pagination = paginate_links([
-						    'base' => add_query_arg('paged', '%#%'),
+						    'base' => add_query_arg('paged', '%#%', admin_url('admin.php?page=spamtroll-logs')),
 						    'format' => '',
 						    'current' => $paged,
 						    'total' => $total_pages,
