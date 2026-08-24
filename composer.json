@@ -4,8 +4,8 @@
     "type": "wordpress-plugin",
     "license": "MIT",
     "require": {
-        "php": ">=8.0",
-        "spamtroll/php-sdk": "^0.9"
+        "php": ">=8.2",
+        "spamtroll/php-sdk": "^0.9.3"
     },
     "require-dev": {
         "brain/monkey": "^2.6",
@@ -26,7 +26,7 @@
         },
         "optimize-autoloader": true,
         "platform": {
-            "php": "8.3"
+            "php": "8.2"
         },
         "sort-packages": true
     },
@@ -54,5 +54,10 @@
         "qa": "Full quality gate: lint check, static analysis, spell-check, and tests"
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "autoload-dev": {
+        "psr-4": {
+            "Spamtroll\\Tests\\": "tests/"
+        }
+    }
 }
