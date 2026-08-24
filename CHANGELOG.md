@@ -31,6 +31,16 @@ here was to keep that true while fixing what sat around it.
 - Forwarded IP headers (`X-Forwarded-For`, `X-Real-IP`, `CF-Connecting-IP`)
   are read only when the operator has confirmed the site is behind a trusted
   proxy, and every address is validated with `FILTER_VALIDATE_IP`.
+- **The API key can no longer leave the host it was issued for.**
+  `wp_remote_request()` follows five redirects by default and Requests
+  replays the request headers on every hop, `X-API-Key` included — so a
+  redirect this plugin never sees, from a hijacked DNS record or a
+  compromised intermediary, would have handed the platform's key to whatever
+  host answered. Platform keys have no expiry, so that leak is permanent.
+  The adapter now sends `redirection => 0`; there is no legitimate redirect
+  on this API, and a 3xx is something to fail open on rather than chase. A
+  response-size cap goes in alongside, so a misrouted answer cannot stream
+  into memory while a visitor waits.
 
 ### Added
 
@@ -111,6 +121,10 @@ here was to keep that true while fixing what sat around it.
 - Unticking every bypass role now means nobody bypasses the scan. An empty
   saved list was indistinguishable from "never configured", so the two
   defaults were silently put back.
+- The latency budget tops out at 10 seconds rather than 30. This is a person
+  waiting on a comment form and the scan fails open, so a thirty-second
+  budget never buys a verdict a three-second one misses — it buys thirty
+  seconds of a pinned PHP-FPM worker.
 - `API URL`, `Latency budget` and `Log Retention` are configurable again.
   Their field renderers existed but were never registered, and `sanitize`
   pinned all three to constants on every save — so a self-hosted instance

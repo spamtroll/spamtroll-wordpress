@@ -38,6 +38,16 @@ use Spamtroll\Sdk\Http\HttpResponse;
 class Spamtroll_Wp_Http_Client implements HttpClientInterface
 {
     /**
+     * Largest response body worth reading, in bytes.
+     *
+     * A scan response is a few kilobytes; the 402 body with its usage block
+     * is the biggest thing the API sends. 256 KiB is generous enough that no
+     * real answer is truncated and small enough that a misrouted one cannot
+     * be a memory event.
+     */
+    public const MAX_RESPONSE_BYTES = 262144;
+
+    /**
      * Headers of the most recent response, keyed by lowercased name.
      *
      * @var array<string, string>
@@ -98,6 +108,19 @@ class Spamtroll_Wp_Http_Client implements HttpClientInterface
             'timeout' => $timeout,
             'sslverify' => true,
             'headers' => $headers,
+            // Do not follow redirects. wp_remote_request() follows five by
+            // default, and Requests replays the request headers on each hop —
+            // including X-API-Key. A redirect this client cannot see, from a
+            // hijacked DNS entry or a compromised intermediary, would hand the
+            // platform's key to whatever host answered. Platform keys have no
+            // TTL, so that leak is permanent. There is no legitimate redirect
+            // on this API: every endpoint answers directly, and a 3xx is
+            // therefore something to fail open on, not to chase.
+            'redirection' => 0,
+            // A body larger than this is not a scan result. Without a cap, a
+            // misrouted response streams into a PHP string while a visitor
+            // waits on a comment form.
+            'limit_response_size' => self::MAX_RESPONSE_BYTES,
         ];
 
         if ('POST' === $method && null !== $body) {

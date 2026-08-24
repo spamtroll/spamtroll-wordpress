@@ -31,7 +31,19 @@ class Spamtroll_Settings
     public const DEFAULT_TIMEOUT = 3;
 
     public const MIN_TIMEOUT = 1;
-    public const MAX_TIMEOUT = 30;
+
+    /**
+     * Longest budget an operator may set.
+     *
+     * Ten, not thirty. This is a person waiting on a submitted comment form,
+     * and the scan fails open — so a thirty-second budget does not buy a
+     * verdict that a three-second one misses, it buys thirty seconds of a
+     * pinned PHP-FPM worker and a visitor deciding the site is broken. The
+     * ceiling also keeps the plugin's budget below the SDK's own
+     * (`totalBudgetMs`, 6s by default from 0.10.0), so a setting saved here
+     * cannot be silently overridden there.
+     */
+    public const MAX_TIMEOUT = 10;
 
     public const DEFAULT_RETENTION_DAYS = 30;
     public const MIN_RETENTION_DAYS = 1;
