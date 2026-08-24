@@ -16,5 +16,6 @@ uses()
     })
     ->afterEach(function (): void {
         Monkey\tearDown();
+        unset($GLOBALS['wpdb']);
     })
-    ->in('Unit');
+    ->in('Unit', 'Regression');

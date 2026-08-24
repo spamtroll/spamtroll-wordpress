@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Brain\Monkey\Functions;
+use Spamtroll\Tests\Support\WpEnv;
 
 /*
  * Regression: the custom top-level admin menu added by Spamtroll_Admin
@@ -13,15 +14,16 @@ use Brain\Monkey\Functions;
  */
 
 beforeEach(function (): void {
-    // Common WP function stubs every render_settings_page() call needs.
+    // render_settings_page() also renders the health and quota panels, which
+    // read the option store — so the whole environment goes up, not a
+    // hand-picked list of stubs that goes stale the moment the page grows.
+    WpEnv::boot();
     Functions\when('current_user_can')->justReturn(true);
+    Functions\when('admin_url')->returnArg();
     Functions\when('get_admin_page_title')->justReturn('Spamtroll');
     Functions\when('settings_fields')->justReturn(null);
     Functions\when('do_settings_sections')->justReturn(null);
     Functions\when('submit_button')->justReturn(null);
-    Functions\when('esc_html')->returnArg();
-    Functions\when('esc_html__')->returnArg();
-    Functions\when('__')->returnArg();
 });
 
 afterEach(function (): void {

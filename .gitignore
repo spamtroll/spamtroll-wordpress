@@ -12,10 +12,16 @@ Thumbs.db
 
 # Composer
 /vendor/
-/composer.lock
+
+# composer.lock IS committed. Without it every CI run resolves dependencies
+# afresh, so which SDK release the build tests against — and therefore
+# whether PHPStan's reportUnmatchedIgnoredErrors fires — depends on the day.
 
 # Tooling caches
 /.php-cs-fixer.cache
 /.phpstan-cache/
 /.phpunit.cache/
 /.peck.cache
+
+# Build output (dev/build-zip.sh) and the regression harness workspace.
+/build/

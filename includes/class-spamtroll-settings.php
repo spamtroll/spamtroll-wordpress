@@ -22,6 +22,41 @@ class Spamtroll_Settings
     public const OPTION_KEY = 'spamtroll_settings';
 
     /**
+     * Seconds allowed for one whole scan, retries included.
+     *
+     * Three, not the SDK's five: this runs while a visitor waits on a
+     * submitted comment form, and the scan fails open, so the choice is
+     * between a fast maybe and a slow maybe.
+     */
+    public const DEFAULT_TIMEOUT = 3;
+
+    public const MIN_TIMEOUT = 1;
+
+    /**
+     * Longest budget an operator may set.
+     *
+     * Ten, not thirty. This is a person waiting on a submitted comment form,
+     * and the scan fails open — so a thirty-second budget does not buy a
+     * verdict that a three-second one misses, it buys thirty seconds of a
+     * pinned PHP-FPM worker and a visitor deciding the site is broken. The
+     * ceiling also keeps the plugin's budget below the SDK's own
+     * (`totalBudgetMs`, 6s by default from 0.10.0), so a setting saved here
+     * cannot be silently overridden there.
+     */
+    public const MAX_TIMEOUT = 10;
+
+    public const DEFAULT_RETENTION_DAYS = 30;
+    public const MIN_RETENTION_DAYS = 1;
+    public const MAX_RETENTION_DAYS = 365;
+
+    /**
+     * Roles that skip scanning when the setting has never been saved.
+     *
+     * @var list<string>
+     */
+    public const DEFAULT_BYPASS_ROLES = [ 'administrator', 'editor' ];
+
+    /**
      * Return the full settings array, narrowed from `get_option()`'s
      * `mixed` return type.
      *
@@ -92,5 +127,59 @@ class Spamtroll_Settings
             }
         }
         return $out;
+    }
+
+    /**
+     * Roles whose submissions skip the scan.
+     *
+     * `stringList()` cannot answer this, because it returns `[]` both for
+     * "never configured" and for "configured to bypass nobody" — and the
+     * caller used to substitute the defaults for both. An administrator who
+     * deliberately unticked every role got the two defaults back silently,
+     * which is the opposite of what they asked for. The key's presence is
+     * what separates the two cases.
+     *
+     * @return list<string>
+     */
+    public static function bypass_roles(): array
+    {
+        $settings = self::all();
+        if (! array_key_exists('bypass_roles', $settings)) {
+            return self::DEFAULT_BYPASS_ROLES;
+        }
+        return self::stringList('bypass_roles');
+    }
+
+    /**
+     * Seconds allowed for one whole scan, clamped to something sane.
+     */
+    public static function timeout(): int
+    {
+        return max(self::MIN_TIMEOUT, min(self::MAX_TIMEOUT, self::int('timeout', self::DEFAULT_TIMEOUT)));
+    }
+
+    /**
+     * Days of scan history to keep.
+     */
+    public static function retention_days(): int
+    {
+        return max(
+            self::MIN_RETENTION_DAYS,
+            min(self::MAX_RETENTION_DAYS, self::int('log_retention_days', self::DEFAULT_RETENTION_DAYS)),
+        );
+    }
+
+    /**
+     * API base URL. Falls back to the SDK's default for anything that is not
+     * a usable http(s) URL, so a half-typed value cannot silently switch the
+     * plugin off.
+     */
+    public static function api_url(): string
+    {
+        $url = trim(self::string('api_url', \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL));
+        if ('' === $url || ! preg_match('#^https?://#i', $url)) {
+            return \Spamtroll\Sdk\ClientConfig::DEFAULT_BASE_URL;
+        }
+        return rtrim($url, '/');
     }
 }

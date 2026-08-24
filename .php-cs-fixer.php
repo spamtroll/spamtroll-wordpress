@@ -8,7 +8,7 @@ $finder = (new PhpCsFixer\Finder())
     ->name('spamtroll.php')
     ->ignoreDotFiles(true)
     ->ignoreVCS(true)
-    ->exclude(['vendor', 'languages', 'assets']);
+    ->exclude(['vendor', 'languages', 'assets', 'build']);
 
 return (new PhpCsFixer\Config())
     ->setRiskyAllowed(true)

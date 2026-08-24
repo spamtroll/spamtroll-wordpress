@@ -1,10 +1,10 @@
 # Copyright (C) 2026 Spamtroll
-# This file is distributed under the GPL-2.0-or-later.
+# This file is distributed under the MIT license.
 msgid ""
 msgstr ""
-"Project-Id-Version: Spamtroll Anti-Spam 0.1.0\n"
+"Project-Id-Version: Spamtroll Anti-Spam 0.2.0\n"
 "Report-Msgid-Bugs-To: https://spamtroll.io/support\n"
-"POT-Creation-Date: 2026-02-14T00:00:00+00:00\n"
+"POT-Creation-Date: 2026-08-24T00:00:00+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -12,251 +12,453 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
+"X-Domain: spamtroll\n"
 
-#: spamtroll.php
-msgid "Spamtroll Anti-Spam"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Spamtroll"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Settings"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Logs"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:102
 msgid "API Configuration"
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
-msgid "Configure your Spamtroll API credentials. Get your API key at spamtroll.io."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Enable Plugin"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Enable Spamtroll spam detection"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:108
 msgid "API Key"
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
-msgid "Your Spamtroll API key."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Test Connection"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:147
 msgid "API URL"
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
-msgid "Spamtroll API endpoint URL. Change only if using a self-hosted instance."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Timeout (seconds)"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "API request timeout in seconds (1-30)."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Detection Settings"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Choose what to scan and configure detection thresholds (0-1 scale, where 1 = definitely spam)."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Check Comments"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Scan comments for spam"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Check Registrations"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Scan user registrations for spam"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Spam Threshold"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Score at or above this threshold triggers the spam action (0-1)."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Suspicious Threshold"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Score at or above this threshold (but below spam) triggers the suspicious action (0-1)."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Actions"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Define what happens when spam or suspicious content is detected."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Spam Action"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Block (mark as spam)"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Send to moderation"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Suspicious Action"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Allow (log only)"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Bypass Settings"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Select user roles that bypass spam checks entirely."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Bypass Roles"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Users with selected roles will bypass spam checks."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Maintenance"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Configure log retention and cleanup settings."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Log Retention (days)"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Number of days to keep scan logs (1-365)."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Testing connection..."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Connection successful!"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Connection failed: "
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Request failed. Please try again."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Permission denied."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Connection successful! API is reachable."
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:296
 msgid "API returned an unexpected response."
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
-msgid "Spamtroll Logs"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "All"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Blocked"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Suspicious"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Safe"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "ID"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Date"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Type"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "IP"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Status"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
-msgid "Score"
-msgstr ""
-
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:673
 msgid "Action"
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
-msgid "Preview"
+#: includes/class-spamtroll-privacy.php:176
+msgid "Action taken"
 msgstr ""
 
-#: includes/class-spamtroll-admin.php
+#: includes/class-spamtroll-admin.php:142
+msgid "Advanced"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:658
+msgid "All"
+msgstr ""
+
+#: includes/class-spamtroll-action-map.php:135
+msgid ""
+"Balanced (recommended) — spam to the spam folder, borderline content to "
+"moderation"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:149
+msgid "Behind a proxy or CDN"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:659
+msgid "Blocked"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:133
+msgid "Bypass Roles"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:128
+msgid "Bypass Settings"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:121
+msgid "Check Comments"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:122
+msgid "Check Registrations"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:170
+msgid "Checked at"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:337
+msgid ""
+"Choose what to scan, and how borderline content is treated. The spam verdict "
+"itself is decided by the Spamtroll API using the thresholds configured for "
+"this platform in your dashboard."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:329
+msgid ""
+"Configure your Spamtroll API credentials. Get your API key at spamtroll.io."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:260
+msgid "Connection failed: "
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:259
+msgid "Connection successful!"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:293
+msgid "Connection successful! API is reachable."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:189
+msgid ""
+"Content is being allowed through unchecked. If this persists, check the "
+"Spamtroll status page or contact support."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:668
+msgid "Date"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:353
+msgid ""
+"Defaults suit almost every site. Change these only if you run a self-hosted "
+"Spamtroll instance, sit behind a proxy, or need a different log retention "
+"period."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:116
+msgid "Detection Settings"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:173
+msgid "Email address"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:107
+msgid "Enable Plugin"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:367
+msgid "Enable Spamtroll spam detection"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:459
+msgid "How aggressively to treat borderline content."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:488
+msgid ""
+"How long scan results — including IP and email addresses — are kept before "
+"the daily cleanup deletes them (1-365)."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:667
+msgid "ID"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:670
+msgid "IP"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:172
+msgid "IP address"
+msgstr ""
+
+#. translators: %1$d: count of skipped scans, %2$d: window in days
+#: includes/class-spamtroll-admin.php:585
+#, php-format
+msgid ""
+"In the last %2$d days, %1$d incoming messages were allowed through without "
+"spam scanning because your Spamtroll daily quota was exhausted. They were "
+"not blocked — but they were not checked either."
+msgstr ""
+
+#. translators: %1$d current, %2$d limit, %3$s plan name
+#: includes/class-spamtroll-admin.php:593
+#, php-format
+msgid "Last reading from API: %1$d / %2$d scans on the %3$s plan."
+msgstr ""
+
+#. translators: %s: human-readable time difference, e.g. "5 mins"
+#: includes/class-spamtroll-admin.php:550
+#, php-format
+msgid "Last seen %s ago."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:148
+msgid "Latency budget (seconds)"
+msgstr ""
+
+#: includes/class-spamtroll-action-map.php:134
+msgid "Lenient — hold spam for moderation, publish borderline content"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:151
+msgid "Log Retention (days)"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:82 includes/class-spamtroll-admin.php:83
+msgid "Logs"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:402
+msgid ""
+"Longest a visitor may wait for the whole spam check, retries included. When "
+"the budget runs out the content is allowed through unscanned."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:177
+msgid ""
+"Messages are being allowed through without a spam check until the quota "
+"resets."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:680
 msgid "No log entries found."
 msgstr ""
 
-#: includes/class-spamtroll-scanner.php
-msgid "Registration blocked by spam filter. Please contact the site administrator if you believe this is an error."
+#: includes/class-spamtroll-admin.php:413
+msgid ""
+"Only tick this if the site really is behind Cloudflare, a load balancer or a "
+"reverse proxy. Anyone can send those headers, so on a directly exposed site "
+"this would let a spammer choose their own reputation."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:223
+msgid "Open Spamtroll settings"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:607
+msgid "Per-day breakdown"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:274
+msgid "Permission denied."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:674
+msgid "Preview"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:412
+msgid "Read the visitor IP from X-Forwarded-For, X-Real-IP or CF-Connecting-IP"
+msgstr ""
+
+#: includes/class-spamtroll-scanner.php:260
+msgid ""
+"Registration blocked by spam filter. Please contact the site administrator "
+"if you believe this is an error."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:261
+msgid "Request failed. Please try again."
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:174
+msgid "Result"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:661
+msgid "Safe"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:434
+msgid "Scan comments for spam"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:444
+msgid "Scan user registrations for spam"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:672
+#: includes/class-spamtroll-privacy.php:175
+msgid "Score"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:345
+msgid "Select user roles that bypass spam checks entirely."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:150
+msgid "Send moderator feedback"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:424
+msgid ""
+"Sends the comment identifier and your verdict — not the comment text — so "
+"detection improves for this platform."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:123
+msgid "Sensitivity"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:73 includes/class-spamtroll-admin.php:74
+#: includes/class-spamtroll-admin.php:315
+msgid "Settings"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:512
+msgid "Settings saved."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:615
+msgid "Some messages were not scanned — daily quota reached"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:62 includes/class-spamtroll-admin.php:63
+msgid "Spamtroll"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:392
+msgid ""
+"Spamtroll API endpoint URL. Change only if using a self-hosted instance."
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:157
+msgid "Spamtroll Anti-Spam"
+msgstr ""
+
+#. translators: %1$s: required PHP version, %2$s: running PHP version
+#: spamtroll.php:77
+#, php-format
+msgid ""
+"Spamtroll Anti-Spam needs PHP %1$s or newer. This site runs PHP %2$s, so "
+"spam scanning is switched off. Ask your host to upgrade PHP, or deactivate "
+"the plugin."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:655
+msgid "Spamtroll Logs"
+msgstr ""
+
+#: includes/class-spamtroll-health.php:182
+msgid "Spamtroll cannot reach the API"
+msgstr ""
+
+#: includes/class-spamtroll-health.php:188
+msgid "Spamtroll got an unexpected answer from the API"
+msgstr ""
+
+#: includes/class-spamtroll-health.php:176
+msgid "Spamtroll has used up today's scan quota"
+msgstr ""
+
+#: includes/class-spamtroll-health.php:170
+msgid "Spamtroll hit its rate limit"
+msgstr ""
+
+#: spamtroll.php:97
+msgid ""
+"Spamtroll is missing its Composer dependencies. Run \"composer install --no-"
+"dev\" in the plugin directory before activating."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:164
+msgid "Spamtroll is not scanning: access to this platform was refused"
+msgstr ""
+
+#: includes/class-spamtroll-health.php:158
+msgid "Spamtroll is not scanning: the API key was rejected"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:60
+#: includes/class-spamtroll-privacy.php:79
+#: includes/class-spamtroll-privacy.php:101
+msgid "Spamtroll spam scan log"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:671
+msgid "Status"
+msgstr ""
+
+#: includes/class-spamtroll-action-map.php:136
+msgid "Strict — spam and borderline content both to the spam folder"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:171
+msgid "Submission type"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:177
+msgid "Submitted text (excerpt)"
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:146
+msgid "Suggested text for sites using Spamtroll Anti-Spam."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:660
+msgid "Suspicious"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:423
+msgid "Tell Spamtroll when a moderator marks a comment as spam or restores it"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:381
+msgid "Test Connection"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:258
+msgid "Testing connection..."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:159
+msgid ""
+"The API returned 401 Unauthorized. Comments and registrations are being "
+"allowed through without any spam check. Paste a valid key on the Spamtroll "
+"settings screen and use Test Connection to confirm it."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:165
+msgid ""
+"The API returned 403 Forbidden — the account is blocked, or this platform "
+"has been switched off in the Spamtroll dashboard. Comments and registrations "
+"are being allowed through without any spam check."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:171
+msgid ""
+"The API returned 429 Too Many Requests. Scans are paused briefly and content "
+"is being allowed through unchecked in the meantime."
+msgstr ""
+
+#: includes/class-spamtroll-health.php:183
+msgid ""
+"The last scan failed to connect or timed out. Content is being allowed "
+"through unchecked until the connection recovers."
+msgstr ""
+
+#. translators: %d: number of days scan results are kept
+#: includes/class-spamtroll-privacy.php:152
+#, php-format
+msgid ""
+"The result of each check — the score, the reason codes, your IP address, "
+"your email address and a short excerpt of the submitted text — is stored on "
+"this site for %d days and then deleted automatically."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:669
+msgid "Type"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:302
+msgid "Unexpected error while testing the connection."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:619
+msgid "Upgrade your plan"
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:478
+msgid "Users with selected roles will bypass spam checks."
+msgstr ""
+
+#: includes/class-spamtroll-privacy.php:148
+msgid ""
+"When you leave a comment or register an account, this site sends the text "
+"you submitted, your IP address, your email address and your chosen username "
+"to Spamtroll (spamtroll.io) so it can be checked for spam. Spamtroll is a "
+"third-party service; see https://spamtroll.io/privacy for how it handles "
+"that data."
+msgstr ""
+
+#: includes/class-spamtroll-admin.php:380
+msgid "Your Spamtroll API key."
 msgstr ""

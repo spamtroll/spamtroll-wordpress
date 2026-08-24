@@ -14,17 +14,56 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
+use Spamtroll\Sdk\Exception\AuthenticationException;
+use Spamtroll\Sdk\Exception\NotConfiguredException;
+use Spamtroll\Sdk\Exception\SpamtrollException;
+use Spamtroll\Sdk\Request\CheckSpamRequest;
+use Spamtroll\Sdk\Response\CheckSpamResponse;
+
 /**
  * Handles spam scanning for comments and registrations.
+ *
+ * Every public entry point here is a fail-open boundary: it is called while a
+ * visitor waits on a submitted form, and it must return the caller's data
+ * untouched whenever the API cannot produce a verdict. That guarantee is
+ * carried by {@see Spamtroll_Verdict} rather than by the branches in this
+ * class — see its docblock for why.
  */
 class Spamtroll_Scanner
 {
     /**
-     * Cached result from the last scan (used between preprocess_comment and pre_comment_approved).
+     * How long a verdict is reused for an identical submission.
      *
-     * @var array{score:float, status:string, action:string}|null
+     * Short on purpose. The cache exists to stop a bot replaying the same
+     * payload from burning the site's daily quota, not to remember verdicts:
+     * the backend re-scores continuously, and a stale `safe` is a hole.
      */
-    private ?array $last_scan_result = null;
+    public const CACHE_TTL = 300;
+
+    public const CACHE_PREFIX = 'spamtroll_scan_';
+
+    /**
+     * Verdict from the last scan, carried from preprocess_comment to
+     * pre_comment_approved.
+     */
+    private ?Spamtroll_Verdict $last_verdict = null;
+
+    /**
+     * Submission the API assigned to the comment currently being saved.
+     *
+     * `preprocess_comment` knows the submission but not the comment ID;
+     * `comment_post` knows the ID but has never seen the response. Static
+     * because those two hooks are served by different objects, and the
+     * window between them is a single request.
+     */
+    private static ?string $last_submission_id = null;
+
+    private Spamtroll_Circuit_Breaker $breaker;
+
+    public function __construct(?Spamtroll_Circuit_Breaker $breaker = null)
+    {
+        $this->breaker = $breaker ?? new Spamtroll_Circuit_Breaker();
+    }
 
     /**
      * Initialize hooks.
@@ -37,7 +76,8 @@ class Spamtroll_Scanner
 
         if (Spamtroll_Settings::bool('check_comments', true)) {
             add_filter('preprocess_comment', [ $this, 'check_comment' ]);
-            add_filter('pre_comment_approved', [ $this, 'filter_comment_approved' ], 10, 2);
+            // Priority 20, after Akismet's 10: see filter_comment_approved().
+            add_filter('pre_comment_approved', [ $this, 'filter_comment_approved' ], 20, 2);
         }
 
         if (Spamtroll_Settings::bool('check_registrations', true)) {
@@ -48,8 +88,8 @@ class Spamtroll_Scanner
     /**
      * Check a comment for spam via the API.
      *
-     * Hooked to `preprocess_comment`. Scans the content and stores the result
-     * for use in `filter_comment_approved`.
+     * Hooked to `preprocess_comment`. Scans the content and stores the
+     * verdict for use in `filter_comment_approved`.
      *
      * @param array<string, mixed> $commentdata Comment data.
      *
@@ -57,84 +97,76 @@ class Spamtroll_Scanner
      */
     public function check_comment(array $commentdata): array
     {
-        $this->last_scan_result = null;
-
-        if ($this->should_bypass()) {
-            return $commentdata;
-        }
-
-        $content = isset($commentdata['comment_content']) && is_string($commentdata['comment_content'])
-            ? $commentdata['comment_content']
-            : '';
-        if (empty(trim($content))) {
-            return $commentdata;
-        }
+        $this->last_verdict = null;
+        self::$last_submission_id = null;
 
         try {
-            $client = Spamtroll_Sdk_Factory::client();
-            $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash((string) $_SERVER['REMOTE_ADDR'])) : '';
-            $email = isset($commentdata['comment_author_email']) && is_string($commentdata['comment_author_email'])
-                ? $commentdata['comment_author_email']
-                : '';
-            $username = isset($commentdata['comment_author']) && is_string($commentdata['comment_author'])
-                ? $commentdata['comment_author']
-                : '';
+            $type = self::string_field($commentdata, 'comment_type');
 
-            $response = $this->scan_with_cache($client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_COMMENT, $ip, $username, $email);
-
-            // Quota exhausted — record locally for the admin dashboard,
-            // then fail open. The SDK never throws on 402; we intentionally
-            // do NOT block the comment because the user is on a free /
-            // capped plan, not because the comment looks like spam.
-            if ($this->is_quota_exceeded($response)) {
-                self::record_skipped_quota($response);
+            // Pingbacks and trackbacks carry an excerpt of somebody else's
+            // page, not something a visitor typed here. Scoring that as a
+            // comment means judging a third-party site's prose, and a block
+            // rejects a legitimate inbound link. WordPress has its own
+            // moderation path for them.
+            if ('pingback' === $type || 'trackback' === $type) {
                 return $commentdata;
             }
 
-            if (! $response->success) {
-                error_log('Spamtroll: API returned error for comment scan: ' . ($response->error ?? '?'));
+            if ($this->should_bypass()) {
                 return $commentdata;
             }
 
-            $score = $response->getSpamScore();
-            $status = $this->determine_status($score);
-            $action = $this->determine_action($score);
+            $content = self::string_field($commentdata, 'comment_content');
+            $email = self::string_field($commentdata, 'comment_author_email');
+            $username = self::string_field($commentdata, 'comment_author');
+            $ip = self::client_ip();
 
-            $this->last_scan_result = [
-                'score' => $score,
-                'status' => $status,
-                'action' => $action,
-            ];
+            $verdict = $this->scan($content, CheckSpamRequest::SOURCE_COMMENT, $ip, $username, $email);
+            $this->last_verdict = $verdict;
+            self::$last_submission_id = $verdict->submission_id;
 
-            $user_id = get_current_user_id();
-
-            Spamtroll_Logger::log([
-                'user_id' => $user_id !== 0 ? $user_id : null,
-                'content_type' => 'comment',
-                'content_id' => null,
-                'ip_address' => $ip,
-                'status' => $status,
-                'spam_score' => $score,
-                'raw_score' => $response->getRawSpamScore(),
-                'symbols' => $response->getSymbols(),
-                'threat_categories' => $response->getThreatCategories(),
-                'action_taken' => $action,
-                'content_preview' => $content,
-            ]);
-        } catch (\Spamtroll\Sdk\Exception\SpamtrollException $e) {
-            // Fail-open: allow the comment through on any API error.
-            error_log('Spamtroll: API exception during comment scan: ' . $e->getMessage());
+            if (Spamtroll_Verdict::REASON_SCANNED === $verdict->reason) {
+                $user_id = get_current_user_id();
+                Spamtroll_Logger::log([
+                    'user_id' => 0 !== $user_id ? $user_id : null,
+                    'content_type' => 'comment',
+                    'content_id' => null,
+                    'submission_id' => $verdict->submission_id,
+                    'ip_address' => $ip,
+                    'email' => $email,
+                    'status' => $verdict->status,
+                    'spam_score' => $verdict->score,
+                    'raw_score' => $verdict->raw_score,
+                    'symbols' => $verdict->symbols,
+                    'threat_categories' => $verdict->categories,
+                    'action_taken' => $verdict->action,
+                    'content_preview' => $content,
+                ]);
+            }
         } catch (\Throwable $e) {
-            error_log('Spamtroll: Unexpected error during comment scan: ' . $e->getMessage());
+            // Belt and braces. scan() already contains every throwable it can
+            // reach, but this method also touches the logger and the option
+            // store, and losing a visitor's comment to a database hiccup
+            // would be a worse outcome than not scanning it.
+            $this->last_verdict = null;
+            self::debug('Unexpected error during comment scan: ' . $e->getMessage());
         }
 
         return $commentdata;
     }
 
     /**
-     * Filter comment approval status based on scan result.
+     * Submission the API assigned to the comment being saved in this request.
+     */
+    public static function last_submission_id(): ?string
+    {
+        return self::$last_submission_id;
+    }
+
+    /**
+     * Filter comment approval status based on the scan verdict.
      *
-     * Hooked to `pre_comment_approved`.
+     * Hooked to `pre_comment_approved` at priority 20.
      *
      * @param int|string|WP_Error $approved Current approval status.
      * @param array<string, mixed> $commentdata Comment data.
@@ -145,18 +177,31 @@ class Spamtroll_Scanner
     {
         unset($commentdata); // Unused — we store the verdict from check_comment.
 
-        if (null === $this->last_scan_result) {
+        $verdict = $this->last_verdict;
+        $this->last_verdict = null;
+
+        if (null === $verdict) {
             return $approved;
         }
 
-        $result = $this->last_scan_result;
-        $this->last_scan_result = null;
+        // Never soften somebody else's verdict. Akismet runs on this same
+        // filter and marks spam as 'spam'; returning 0 for our own
+        // "moderate" would promote that spam into the moderation queue,
+        // where a human is invited to approve it. Escalation is fine, and
+        // a WP_Error means core has already refused the comment outright.
+        if (is_wp_error($approved) || 'spam' === $approved || 'trash' === $approved) {
+            return $approved;
+        }
 
-        return match ($result['action']) {
-            'block' => 'spam',
-            'moderate' => 0,
-            default => $approved,
-        };
+        if ($verdict->is_blocked()) {
+            return 'spam';
+        }
+
+        if ($verdict->is_moderated()) {
+            return 0;
+        }
+
+        return $approved;
     }
 
     /**
@@ -172,124 +217,395 @@ class Spamtroll_Scanner
      */
     public function check_registration(WP_Error $errors, string $sanitized_user_login, string $user_email): WP_Error
     {
-        if ($this->should_bypass()) {
-            return $errors;
-        }
-
-        $content = $sanitized_user_login . ' ' . $user_email;
-
         try {
-            $client = Spamtroll_Sdk_Factory::client();
-            $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash((string) $_SERVER['REMOTE_ADDR'])) : '';
-
-            $response = $this->scan_with_cache($client, $content, \Spamtroll\Sdk\Request\CheckSpamRequest::SOURCE_REGISTRATION, $ip, $sanitized_user_login, $user_email);
-
-            if ($this->is_quota_exceeded($response)) {
-                self::record_skipped_quota($response);
+            if ($this->should_bypass()) {
                 return $errors;
             }
 
-            if (! $response->success) {
-                error_log('Spamtroll: API returned error for registration scan: ' . ($response->error ?? '?'));
-                return $errors;
+            $ip = self::client_ip();
+
+            // `source=registration` makes the backend skip content analysis,
+            // RETVec and Bayes entirely and score `username`/`email` through
+            // registration_check instead. `content` still has to be non-empty
+            // (an empty one is a 422), so the username goes in — the email
+            // does not, because it would then be echoed back into the local
+            // log's content preview for no gain.
+            $verdict = $this->scan(
+                $sanitized_user_login,
+                CheckSpamRequest::SOURCE_REGISTRATION,
+                $ip,
+                $sanitized_user_login,
+                $user_email,
+            );
+
+            if (Spamtroll_Verdict::REASON_SCANNED === $verdict->reason) {
+                Spamtroll_Logger::log([
+                    'user_id' => null,
+                    'content_type' => 'registration',
+                    'content_id' => null,
+                    'submission_id' => $verdict->submission_id,
+                    'ip_address' => $ip,
+                    'email' => $user_email,
+                    'status' => $verdict->status,
+                    'spam_score' => $verdict->score,
+                    'raw_score' => $verdict->raw_score,
+                    'symbols' => $verdict->symbols,
+                    'threat_categories' => $verdict->categories,
+                    'action_taken' => $verdict->action,
+                    'content_preview' => $sanitized_user_login,
+                ]);
             }
 
-            $score = $response->getSpamScore();
-            $status = $this->determine_status($score);
-            $action = $this->determine_action($score);
-
-            Spamtroll_Logger::log([
-                'user_id' => null,
-                'content_type' => 'registration',
-                'content_id' => null,
-                'ip_address' => $ip,
-                'status' => $status,
-                'spam_score' => $score,
-                'raw_score' => $response->getRawSpamScore(),
-                'symbols' => $response->getSymbols(),
-                'threat_categories' => $response->getThreatCategories(),
-                'action_taken' => $action,
-                'content_preview' => $content,
-            ]);
-
-            if ('block' === $action) {
+            if ($verdict->is_blocked()) {
                 $errors->add('spamtroll_blocked', __('Registration blocked by spam filter. Please contact the site administrator if you believe this is an error.', 'spamtroll'));
             }
-        } catch (\Spamtroll\Sdk\Exception\SpamtrollException $e) {
-            // Fail-open: allow registration on any API error.
-            error_log('Spamtroll: API exception during registration scan: ' . $e->getMessage());
         } catch (\Throwable $e) {
-            error_log('Spamtroll: Unexpected error during registration scan: ' . $e->getMessage());
+            self::debug('Unexpected error during registration scan: ' . $e->getMessage());
         }
 
         return $errors;
     }
 
     /**
-     * Call the API with a 1-hour transient cache keyed on the
-     * content + source + email. Identical repeated submissions (e.g. a
-     * bot hammering the same comment form with the same payload from
-     * different IPs) reuse the first verdict instead of burning through
-     * the user's API quota.
+     * Performs the scan and turns the API's verdict into a local action.
      *
-     * Only caches successful API calls — errors fall straight through so
-     * we don't lock in a bad verdict.
+     * This method never throws and never returns an action other than
+     * `allow` unless the API answered with one. Both properties are enforced
+     * by {@see Spamtroll_Verdict}, whose constructor is private.
      */
-    private function scan_with_cache(
-        \Spamtroll\Sdk\Client $client,
-        string $content,
-        string $source,
-        string $ip,
-        string $username,
-        string $email,
-    ): \Spamtroll\Sdk\Response\CheckSpamResponse {
-        $cache_key = 'spamtroll_scan_' . md5($source . '|' . $email . '|' . trim($content));
-        $cached = get_transient($cache_key);
-        if ($cached instanceof \Spamtroll\Sdk\Response\CheckSpamResponse && $cached->success) {
-            return $cached;
-        }
-        $response = $client->checkSpam(new \Spamtroll\Sdk\Request\CheckSpamRequest(
-            $content,
-            $source,
-            $ip !== '' ? $ip : null,
-            $username !== '' ? $username : null,
-            $email !== '' ? $email : null,
-        ));
-        if ($response->success) {
-            set_transient($cache_key, $response, HOUR_IN_SECONDS);
-        }
-        return $response;
+    private function scan(string $content, string $source, string $ip, string $username, string $email): Spamtroll_Verdict
+    {
+        $verdict = $this->decide($content, $source, $ip, $username, $email);
+
+        /**
+         * Every verdict this plugin reaches, however it reached it.
+         *
+         * The one extension point that matters: it is how a site logs to
+         * somewhere other than the plugin's own table, feeds a dashboard, or
+         * notices that scans have quietly stopped happening.
+         *
+         * @param Spamtroll_Verdict $verdict Action, backend status, score, symbols and reason.
+         * @param string $source `comment` or `registration`.
+         */
+        do_action('spamtroll_scan_verdict', $verdict, $source);
+
+        return $verdict;
     }
 
     /**
-     * True when the API returned 402 — the account ran out of daily
-     * scans and is on a free / capped plan. Detected purely by status
-     * code so this works with both the current SDK release (0.9.2)
-     * and the unreleased one that adds isQuotaExceeded(). When the
-     * SDK ships 0.9.3 the wasSkipped() method will be the cleaner
-     * call; the httpCode check stays as a belt-and-braces fallback.
+     * The scan itself. Split from scan() only so the action above fires on
+     * every path out, including the early returns.
      */
-    private function is_quota_exceeded(\Spamtroll\Sdk\Response\CheckSpamResponse $response): bool
+    private function decide(string $content, string $source, string $ip, string $username, string $email): Spamtroll_Verdict
     {
-        if (method_exists($response, 'isQuotaExceeded')) {
-            /** @phpstan-ignore-next-line older SDK installs don't have this method */
-            if ($response->isQuotaExceeded() === true) {
-                return true;
+        if ('' === trim($content)) {
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_EMPTY_CONTENT);
+        }
+
+        if ('' === Spamtroll_Settings::string('api_key')) {
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_NOT_CONFIGURED);
+        }
+
+        // A short circuit costs nothing and saves the visitor the whole
+        // budget. While the key is revoked, the quota is spent or the
+        // limiter is saying no, every request gets the same answer.
+        if ($this->breaker->is_open()) {
+            self::debug('circuit open (' . $this->breaker->reason() . ') — ' . $source . ' allowed through unscanned');
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_BREAKER_OPEN);
+        }
+
+        $map = new Spamtroll_Action_Map();
+        $cache_key = self::cache_key($source, $ip, $email, $content);
+
+        $cached = self::read_cache($cache_key);
+        if (null !== $cached) {
+            return Spamtroll_Verdict::from_response($cached, $map);
+        }
+
+        $http = new Spamtroll_Wp_Http_Client();
+
+        try {
+            // The budget covers the whole scan, retries included — the SDK's
+            // own timeout bounds one attempt only.
+            $http->set_deadline(hrtime(true) + (Spamtroll_Settings::timeout() * 1_000_000_000));
+
+            $response = Spamtroll_Sdk_Factory::client(null, $http)->checkSpam(new CheckSpamRequest(
+                $content,
+                $source,
+                '' !== $ip ? $ip : null,
+                '' !== $username ? $username : null,
+                '' !== $email ? $email : null,
+            ));
+        } catch (AuthenticationException $e) {
+            // 401. The SDK throws rather than returning, and no number of
+            // retries will make a rejected key acceptable.
+            return $this->fail(Spamtroll_Verdict::REASON_AUTH_ERROR, Spamtroll_Circuit_Breaker::KIND_AUTH, 401, $e->getMessage());
+        } catch (NotConfiguredException) {
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_NOT_CONFIGURED);
+        } catch (SpamtrollException $e) {
+            // Timeouts, DNS failures, connection refused, 5xx after retries.
+            return $this->fail(Spamtroll_Verdict::REASON_TRANSPORT_ERROR, Spamtroll_Circuit_Breaker::KIND_TRANSPORT, 0, $e->getMessage());
+        } catch (\Throwable $e) {
+            // An \Error from a future SDK release must not escape into
+            // wp_new_comment() and lose the submission.
+            return $this->fail(Spamtroll_Verdict::REASON_TRANSPORT_ERROR, Spamtroll_Circuit_Breaker::KIND_TRANSPORT, 0, $e->getMessage());
+        }
+
+        $retry_after = Spamtroll_Retry_After::parse($http->get_last_headers()['retry-after'] ?? null);
+
+        if (self::is_quota_exceeded($response)) {
+            // Not spam and not an error: a billing condition. Record it for
+            // the settings-screen panel and let the message through.
+            self::record_skipped_quota($response);
+            $this->breaker->record_failure(
+                Spamtroll_Circuit_Breaker::KIND_QUOTA,
+                $retry_after ?? self::seconds_until_quota_reset($response),
+            );
+            Spamtroll_Health::record(Spamtroll_Verdict::REASON_QUOTA, 402, self::error_text($response));
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_QUOTA);
+        }
+
+        if (429 === $response->httpCode) {
+            return $this->fail(Spamtroll_Verdict::REASON_RATE_LIMITED, Spamtroll_Circuit_Breaker::KIND_RATE_LIMITED, 429, self::error_text($response), $retry_after);
+        }
+
+        if (403 === $response->httpCode) {
+            return $this->fail(Spamtroll_Verdict::REASON_FORBIDDEN, Spamtroll_Circuit_Breaker::KIND_AUTH, 403, self::error_text($response));
+        }
+
+        if (401 === $response->httpCode) {
+            return $this->fail(Spamtroll_Verdict::REASON_AUTH_ERROR, Spamtroll_Circuit_Breaker::KIND_AUTH, 401, self::error_text($response));
+        }
+
+        if (! $response->success) {
+            return $this->fail(Spamtroll_Verdict::REASON_API_ERROR, Spamtroll_Circuit_Breaker::KIND_TRANSPORT, $response->httpCode, self::error_text($response));
+        }
+
+        // A 200 is not by itself a verdict. A captive portal, a WAF or a
+        // misrouted proxy will happily answer 200 with HTML, and the SDK
+        // decodes that into an empty payload — which reads as `safe`, score
+        // 0. Recording that as "scanned, clean" would be a lie, and caching
+        // it would keep the lie for the whole TTL.
+        if (! self::carries_verdict($response)) {
+            $this->breaker->record_failure(Spamtroll_Circuit_Breaker::KIND_TRANSPORT);
+            Spamtroll_Health::record(Spamtroll_Verdict::REASON_NO_VERDICT, $response->httpCode, 'response carried no status or spam_score');
+            self::debug('API returned ' . $response->httpCode . ' with no verdict for ' . $source . ' scan');
+            return Spamtroll_Verdict::allow(Spamtroll_Verdict::REASON_NO_VERDICT);
+        }
+
+        $this->breaker->record_success();
+        Spamtroll_Health::record_success();
+        self::write_cache($cache_key, $response);
+
+        return Spamtroll_Verdict::from_response($response, $map);
+    }
+
+    /**
+     * Records a failure everywhere it needs recording, then allows.
+     */
+    private function fail(string $reason, string $kind, int $code, string $message, ?int $retry_after = null): Spamtroll_Verdict
+    {
+        $this->breaker->record_failure($kind, $retry_after);
+        Spamtroll_Health::record($reason, $code, $message);
+        self::debug('scan failed (' . $reason . ', HTTP ' . $code . '): ' . $message);
+
+        return Spamtroll_Verdict::allow($reason);
+    }
+
+    // -------------------------------------------------------------------------
+    // Client IP
+    // -------------------------------------------------------------------------
+
+    /**
+     * The visitor's IP address, or an empty string when there isn't a usable one.
+     *
+     * `REMOTE_ADDR` is the proxy's address behind Cloudflare, an nginx
+     * reverse proxy, a load balancer or Varnish — so every scan on such a
+     * site reports the same IP, and `ip_check`, `geo_check` and
+     * `hosting_check` end up scoring the CDN instead of the spammer. If that
+     * address ever lands on a reputation list, the site starts blocking its
+     * own readers.
+     *
+     * Forwarded headers are only read when the operator has said the site
+     * actually sits behind a trusted proxy, because anyone can send them.
+     */
+    public static function client_ip(): string
+    {
+        $ip = self::server_string('REMOTE_ADDR');
+
+        if (Spamtroll_Settings::bool('trust_proxy')) {
+            foreach ([ 'HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP', 'HTTP_X_FORWARDED_FOR' ] as $header) {
+                $candidate = self::server_string($header);
+                if ('' === $candidate) {
+                    continue;
+                }
+                // X-Forwarded-For is a chain; the client is the first entry.
+                $first = trim(explode(',', $candidate)[0]);
+                if (false !== filter_var($first, FILTER_VALIDATE_IP)) {
+                    $ip = $first;
+                    break;
+                }
             }
         }
-        return $response->httpCode === 402;
+
+        if (false === filter_var($ip, FILTER_VALIDATE_IP)) {
+            $ip = '';
+        }
+
+        /**
+         * The address sent to the API and stored in the local log.
+         *
+         * The last word for sites whose proxy layer this plugin cannot guess.
+         *
+         * @param string $ip Address resolved so far, or an empty string.
+         */
+        $filtered = apply_filters('spamtroll_client_ip', $ip);
+
+        if (! is_string($filtered) || false === filter_var($filtered, FILTER_VALIDATE_IP)) {
+            return $ip;
+        }
+
+        return $filtered;
+    }
+
+    // -------------------------------------------------------------------------
+    // Cache
+    // -------------------------------------------------------------------------
+
+    /**
+     * Transient key for one submission.
+     *
+     * The IP belongs in the key. It used to be left out deliberately — the
+     * comment described a bot replaying one payload from many addresses —
+     * but the backend scores the address as heavily as the text, through
+     * `ip_check`, `geo_check` and `hosting_check`. Keying without it makes
+     * the cache wrong in both directions: a `safe` earned from a clean
+     * address gets reused for the same text sent from a blacklisted one, and
+     * a block earned by a bad address is applied to an innocent visitor who
+     * happened to write "Thanks, great post!" — which is exactly the sort of
+     * text that collides.
+     */
+    public static function cache_key(string $source, string $ip, string $email, string $content): string
+    {
+        return self::CACHE_PREFIX . md5($source . '|' . $ip . '|' . $email . '|' . trim($content));
     }
 
     /**
-     * Record a quota-exhausted scan in the rolling 30-day local log
-     * so the plugin's admin dashboard can show "X messages were left
-     * unscanned because you hit your daily limit — upgrade your plan".
-     * Storage: a single wp_options entry keyed `spamtroll_quota_skipped_log`,
-     * shape `[ "YYYY-MM-DD" => count, … ]` plus a `last_usage` block.
-     * Pruned to 30 days on each write so the option never grows
-     * unbounded.
+     * Reads a cached verdict, or null when there isn't a usable one.
+     *
+     * Stored as plain scalars rather than a serialized SDK object: an object
+     * survives an SDK upgrade in the database but not necessarily in PHP, and
+     * an unserialized instance of a class whose shape has changed throws on
+     * first property access. Data has no such problem.
      */
-    public static function record_skipped_quota(\Spamtroll\Sdk\Response\CheckSpamResponse $response): void
+    private static function read_cache(string $key): ?CheckSpamResponse
+    {
+        $cached = get_transient($key);
+        if (! is_array($cached) || ! isset($cached['status'])) {
+            return null;
+        }
+
+        return new CheckSpamResponse(true, 200, [ 'success' => true, 'data' => $cached ]);
+    }
+
+    private static function write_cache(string $key, CheckSpamResponse $response): void
+    {
+        set_transient($key, [
+            'status' => $response->getStatus(),
+            'spam_score' => $response->getRawSpamScore(),
+            'symbols' => $response->getSymbols(),
+            'threat_categories' => $response->getThreatCategories(),
+            'submission_id' => $response->getSubmissionId(),
+        ], self::CACHE_TTL);
+    }
+
+    // -------------------------------------------------------------------------
+    // Response inspection
+    // -------------------------------------------------------------------------
+
+    /**
+     * True when the body actually contains a scan result.
+     */
+    private static function carries_verdict(CheckSpamResponse $response): bool
+    {
+        $payload = isset($response->data['data']) && is_array($response->data['data'])
+            ? $response->data['data']
+            : $response->data;
+
+        return isset($payload['status']) || isset($payload['spam_score']);
+    }
+
+    /**
+     * True when the API returned 402 — the account ran out of daily scans.
+     */
+    private static function is_quota_exceeded(CheckSpamResponse $response): bool
+    {
+        return $response->isQuotaExceeded() || 402 === $response->httpCode;
+    }
+
+    /**
+     * The most informative error string the response can offer.
+     *
+     * `$response->error` is the SDK's `extractError()`, which reads
+     * `data.error` first. That is a string for the standard envelope but a
+     * bare `true` for the HTTP limiter's shape and for Fiber's 404 handler,
+     * and casting `true` to string yields `"1"` — so the actual message
+     * ("Rate limit exceeded. Maximum 100 requests per minute.") used to be
+     * thrown away exactly when it was most wanted.
+     */
+    private static function error_text(CheckSpamResponse $response): string
+    {
+        $error = $response->error;
+        if (is_string($error) && '' !== $error && '1' !== $error) {
+            return $error;
+        }
+
+        $envelope = $response->data['error'] ?? null;
+        if (is_array($envelope) && isset($envelope['message']) && is_string($envelope['message'])) {
+            return $envelope['message'];
+        }
+
+        $message = $response->getMessage();
+        if (is_string($message) && '' !== $message) {
+            return $message;
+        }
+
+        return is_string($error) ? $error : 'API error';
+    }
+
+    /**
+     * Seconds until the quota window rolls over, from the 402 body.
+     */
+    private static function seconds_until_quota_reset(CheckSpamResponse $response): ?int
+    {
+        $usage = $response->getQuotaUsage();
+        $reset = $usage['reset_at'] ?? null;
+        if (! is_string($reset) || '' === $reset) {
+            return null;
+        }
+
+        $timestamp = strtotime($reset);
+        if (false === $timestamp) {
+            return null;
+        }
+
+        return Spamtroll_Retry_After::parse((string) max(0, $timestamp - time()));
+    }
+
+    // -------------------------------------------------------------------------
+    // Quota bookkeeping
+    // -------------------------------------------------------------------------
+
+    /**
+     * Record a quota-exhausted scan in the rolling 30-day local log so the
+     * settings screen can show "X messages were left unscanned because you
+     * hit your daily limit — upgrade your plan".
+     *
+     * Storage: a single wp_options entry keyed `spamtroll_quota_skipped_log`,
+     * shape `[ "YYYY-MM-DD" => count, … ]` plus a `last_usage` block. Pruned
+     * to 30 days on each write so the option never grows unbounded.
+     */
+    public static function record_skipped_quota(CheckSpamResponse $response): void
     {
         $today = gmdate('Y-m-d');
         $stored = get_option('spamtroll_quota_skipped_log', []);
@@ -301,31 +617,25 @@ class Spamtroll_Scanner
         $byDay[ $today ] = (isset($byDay[ $today ]) && is_int($byDay[ $today ])) ? $byDay[ $today ] + 1 : 1;
 
         // Prune to last 30 days.
-        $cutoff = gmdate('Y-m-d', strtotime('-30 days'));
+        $cutoff = self::days_ago(30);
         foreach (array_keys($byDay) as $day) {
             if (! is_string($day) || $day < $cutoff) {
                 unset($byDay[ $day ]);
             }
         }
 
-        $usage = [];
-        if (method_exists($response, 'getQuotaUsage')) {
-            /** @phpstan-ignore-next-line older SDK installs don't have this method */
-            $usage = $response->getQuotaUsage();
-        }
-
         update_option('spamtroll_quota_skipped_log', [
             'days' => $byDay,
             'last_at' => time(),
-            'last_usage' => is_array($usage) ? $usage : [],
+            'last_usage' => $response->getQuotaUsage(),
         ], false);
     }
 
     /**
-     * Stats for the admin dashboard panel. Returns the day-by-day
-     * skipped count for the last $days days plus the most recent
-     * usage block reported by the API. Always returns a populated
-     * shape — empty arrays when nothing has been recorded yet.
+     * Stats for the settings-screen panel: the day-by-day skipped count for
+     * the last $days days plus the most recent usage block reported by the
+     * API. Always returns a populated shape — empty arrays when nothing has
+     * been recorded yet.
      *
      * @return array{total: int, today: int, days: array<string,int>, last_usage: array<string,mixed>, last_at: int}
      */
@@ -337,7 +647,7 @@ class Spamtroll_Scanner
         }
         $byDay = isset($stored['days']) && is_array($stored['days']) ? $stored['days'] : [];
 
-        $cutoff = gmdate('Y-m-d', strtotime('-' . max(1, $days) . ' days'));
+        $cutoff = self::days_ago(max(1, $days));
         $window = [];
         $total = 0;
         foreach ($byDay as $day => $count) {
@@ -364,9 +674,22 @@ class Spamtroll_Scanner
     }
 
     /**
+     * `Y-m-d` for N days ago. `strtotime()` returns int|false and gmdate()
+     * will not take a false, so the fallback keeps the pruning window from
+     * collapsing to the epoch and deleting the whole log.
+     */
+    private static function days_ago(int $days): string
+    {
+        $timestamp = strtotime('-' . $days . ' days');
+        return gmdate('Y-m-d', false === $timestamp ? time() - ($days * DAY_IN_SECONDS) : $timestamp);
+    }
+
+    // -------------------------------------------------------------------------
+    // Bypass
+    // -------------------------------------------------------------------------
+
+    /**
      * Check if the current user should bypass spam checking.
-     *
-     * @return bool True if the user should bypass.
      */
     private function should_bypass(): bool
     {
@@ -375,13 +698,9 @@ class Spamtroll_Scanner
         }
 
         $user = wp_get_current_user();
-        $bypass = Spamtroll_Settings::stringList('bypass_roles');
-        if ($bypass === []) {
-            $bypass = [ 'administrator', 'editor' ];
-        }
-
         $roles = is_array($user->roles) ? $user->roles : [];
-        foreach ($bypass as $role) {
+
+        foreach (Spamtroll_Settings::bypass_roles() as $role) {
             if (in_array($role, $roles, true)) {
                 return true;
             }
@@ -390,49 +709,35 @@ class Spamtroll_Scanner
         return false;
     }
 
+    // -------------------------------------------------------------------------
+    // Small helpers
+    // -------------------------------------------------------------------------
+
     /**
-     * Determine action based on normalized spam score.
-     *
-     * @param float $score Normalized spam score (0-1).
-     *
-     * @return string Action to take (block, moderate, allow).
+     * @param array<string, mixed> $data
      */
-    private function determine_action(float $score): string
+    private static function string_field(array $data, string $key): string
     {
-        $spam_threshold = Spamtroll_Settings::float('spam_threshold', 0.70);
-        $suspicious_threshold = Spamtroll_Settings::float('suspicious_threshold', 0.40);
+        return isset($data[ $key ]) && is_scalar($data[ $key ]) ? (string) $data[ $key ] : '';
+    }
 
-        if ($score >= $spam_threshold) {
-            return Spamtroll_Settings::string('action_blocked', 'block');
-        }
-
-        if ($score >= $suspicious_threshold) {
-            return Spamtroll_Settings::string('action_suspicious', 'moderate');
-        }
-
-        return 'allow';
+    private static function server_string(string $key): string
+    {
+        // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotValidated
+        return isset($_SERVER[ $key ]) && is_scalar($_SERVER[ $key ])
+            ? sanitize_text_field(wp_unslash((string) $_SERVER[ $key ]))
+            : '';
     }
 
     /**
-     * Determine status label based on normalized spam score.
-     *
-     * @param float $score Normalized spam score (0-1).
-     *
-     * @return string Status label (blocked, suspicious, safe).
+     * One line per failed scan is one line per comment during an outage, and
+     * a busy blog fills debug.log with it. wordpress.org's guidelines want
+     * this gated; so does anybody who has had to read such a file.
      */
-    private function determine_status(float $score): string
+    private static function debug(string $message): void
     {
-        $spam_threshold = Spamtroll_Settings::float('spam_threshold', 0.70);
-        $suspicious_threshold = Spamtroll_Settings::float('suspicious_threshold', 0.40);
-
-        if ($score >= $spam_threshold) {
-            return 'blocked';
+        if (defined('WP_DEBUG') && WP_DEBUG) {
+            error_log('Spamtroll: ' . $message);
         }
-
-        if ($score >= $suspicious_threshold) {
-            return 'suspicious';
-        }
-
-        return 'safe';
     }
 }
