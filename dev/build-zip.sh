@@ -11,6 +11,7 @@
 # Usage: bash dev/build-zip.sh
 
 set -euo pipefail
+export TZ=UTC
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
