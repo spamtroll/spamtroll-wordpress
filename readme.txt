@@ -2,9 +2,9 @@
 Contributors: spamtroll
 Tags: spam, antispam, comments, registration, moderation
 Requires at least: 6.0
-Tested up to: 6.9
+Tested up to: 7.1
 Requires PHP: 8.2
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: MIT
 License URI: https://opensource.org/licenses/MIT
 
@@ -72,6 +72,12 @@ Change the spam threshold for your platform in the Spamtroll dashboard. The **Se
 
 == Changelog ==
 
+= 0.2.1 =
+* Verify compatibility with WordPress 7.1
+* Clear scheduled log cleanup on every site during network deactivation
+* Escape quota notice output at rendering time
+* Include Composer dependency manifests in the installable package
+
 = 0.2.0 =
 * Act on the API's verdict instead of re-deriving one from the score
 * Require PHP 8.2, which is what the code has needed all along
@@ -89,6 +95,9 @@ Change the spam threshold for your platform in the Spamtroll dashboard. The **Se
 * Initial release
 
 == Upgrade Notice ==
+
+= 0.2.1 =
+WordPress 7.1 compatibility, multisite cleanup and directory package improvements.
 
 = 0.2.0 =
 Requires PHP 8.2. Spam verdicts now come from the API rather than a local score calculation, so content the backend calls spam is treated as spam.

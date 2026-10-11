@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-11
+
+- Verify installation and lifecycle against WordPress 7.1.3.
+- Clear scheduled log cleanup for all sites on network deactivation.
+- Escape quota notices at the output boundary.
+- Bundle Composer manifests for dependency review and build runtime dependencies in staging without replacing the checkout's QA tools.
+
 ## [0.2.0] - 2026-08-24
 
 Every change below traces to a finding in the plugin audit

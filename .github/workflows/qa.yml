@@ -133,3 +133,39 @@ jobs:
           name: spamtroll-wordpress
           path: build/spamtroll.zip
           if-no-files-found: error
+
+  wordpress:
+    name: WordPress ${{ matrix.wordpress }} lifecycle and directory checks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        wordpress: ['6.0', '7.1.3']
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: qa-only
+          MARIADB_DATABASE: spamtroll_qa
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring, mysqli
+          coverage: none
+          tools: composer:v2, wp-cli
+      - name: Build and verify release package
+        run: bash dev/build-zip.sh && bash dev/verify-zip.sh
+      - name: Real single-site and multisite lifecycle
+        env:
+          WP_TEST_DB_HOST: 127.0.0.1:3306
+          WP_TEST_DB_NAME: spamtroll_qa
+          WP_TEST_DB_USER: root
+          WP_TEST_DB_PASSWORD: qa-only
+          WP_VERSION: ${{ matrix.wordpress }}
+        run: bash dev/verify-wordpress.sh

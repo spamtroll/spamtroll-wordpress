@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Plugin Name: Spamtroll Anti-Spam
  * Plugin URI:  https://spamtroll.io
  * Description: Real-time spam detection for comments and registrations powered by the Spamtroll API.
- * Version:     0.2.0
+ * Version:     0.2.1
  * Author:      Spamtroll
  * Author URI:  https://spamtroll.io
  * License:     MIT
@@ -13,7 +13,7 @@ declare(strict_types=1);
  * Text Domain: spamtroll
  * Domain Path: /languages
  * Requires at least: 6.0
- * Tested up to: 6.9
+ * Tested up to: 7.1
  * Requires PHP: 8.2
  *
  * @package Spamtroll
@@ -26,7 +26,7 @@ if (! defined('ABSPATH')) {
 /**
  * Plugin version.
  */
-define('SPAMTROLL_VERSION', '0.2.0');
+define('SPAMTROLL_VERSION', '0.2.1');
 
 /**
  * Plugin directory path (with trailing slash).
@@ -189,8 +189,17 @@ add_action('wp_initialize_site', 'spamtroll_initialize_new_site', 20);
 /**
  * Run on plugin deactivation.
  */
-function spamtroll_deactivate(): void
+function spamtroll_deactivate(bool $network_wide = false): void
 {
+    if (is_multisite() && $network_wide) {
+        foreach (get_sites([ 'fields' => 'ids', 'number' => 0 ]) as $blog_id) {
+            switch_to_blog((int) $blog_id);
+            wp_clear_scheduled_hook('spamtroll_cleanup_logs');
+            restore_current_blog();
+        }
+        return;
+    }
+
     wp_clear_scheduled_hook('spamtroll_cleanup_logs');
 }
 register_deactivation_hook(__FILE__, 'spamtroll_deactivate');

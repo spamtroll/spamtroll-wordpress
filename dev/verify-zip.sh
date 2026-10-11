@@ -29,9 +29,12 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 [ -f "${OUT}/${SLUG}/vendor/autoload.php" ] || fail "no vendor/autoload.php — the plugin would refuse to load"
 [ -f "${OUT}/${SLUG}/readme.txt" ] || fail "no readme.txt — wordpress.org requires one"
 
-for unwanted in tests dev .github composer.json phpstan.neon; do
+for unwanted in tests dev .github phpstan.neon vendor/bin vendor/phpunit vendor/pestphp; do
   [ ! -e "${OUT}/${SLUG}/${unwanted}" ] || fail "${unwanted} was packaged"
 done
+
+[ -f "${OUT}/${SLUG}/composer.json" ] || fail "no Composer manifest for bundled dependencies"
+[ -f "${OUT}/${SLUG}/composer.lock" ] || fail "no lock file identifying bundled dependency versions"
 
 header_version=$(sed -n 's/^ \* Version:[[:space:]]*//p' "${OUT}/${SLUG}/${SLUG}.php" | head -1 | tr -d '[:space:]')
 stable_tag=$(sed -n 's/^Stable tag:[[:space:]]*//p' "${OUT}/${SLUG}/readme.txt" | head -1 | tr -d '[:space:]')

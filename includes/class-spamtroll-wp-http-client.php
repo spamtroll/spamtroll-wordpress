@@ -133,8 +133,12 @@ class Spamtroll_Wp_Http_Client implements HttpClientInterface
             $message = $response->get_error_message();
             $lower = strtolower($message);
             if (str_contains($lower, 'timed out') || str_contains($lower, 'timeout')) {
+                // Internal SDK exception, caught by the scanner; never rendered as HTML.
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
                 throw TimeoutException::afterSeconds($timeout);
             }
+            // Keep the raw diagnostic for internal classification, not page output.
+            // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
             throw ConnectionException::fromMessage($message);
         }
 

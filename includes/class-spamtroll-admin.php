@@ -582,7 +582,7 @@ class Spamtroll_Admin
 
         $summary = sprintf(
             /* translators: %1$d: count of skipped scans, %2$d: window in days */
-            esc_html__('In the last %2$d days, %1$d incoming messages were allowed through without spam scanning because your Spamtroll daily quota was exhausted. They were not blocked — but they were not checked either.', 'spamtroll'),
+            __('In the last %2$d days, %1$d incoming messages were allowed through without spam scanning because your Spamtroll daily quota was exhausted. They were not blocked — but they were not checked either.', 'spamtroll'),
             (int) $stats['total'],
             7,
         );
@@ -590,10 +590,10 @@ class Spamtroll_Admin
         $reading = $limit > 0
             ? sprintf(
                 /* translators: %1$d current, %2$d limit, %3$s plan name */
-                esc_html__('Last reading from API: %1$d / %2$d scans on the %3$s plan.', 'spamtroll'),
+                __('Last reading from API: %1$d / %2$d scans on the %3$s plan.', 'spamtroll'),
                 $current,
                 $limit,
-                esc_html($plan),
+                $plan,
             )
             : '';
 
@@ -613,11 +613,11 @@ class Spamtroll_Admin
                 . '<h3 style="margin-top:0;">%1$s</h3><p>%2$s</p>%3$s'
                 . '<p><a class="button button-primary" href="%4$s" target="_blank" rel="noopener">%5$s</a></p>%6$s</div>',
             esc_html__('Some messages were not scanned — daily quota reached', 'spamtroll'),
-            $summary,
-            '' !== $reading ? '<p>' . $reading . '</p>' : '',
+            esc_html($summary),
+            '' !== $reading ? '<p>' . esc_html($reading) . '</p>' : '',
             esc_url('https://spamtroll.io/dashboard/billing'),
             esc_html__('Upgrade your plan', 'spamtroll'),
-            $breakdown,
+            wp_kses_post($breakdown),
         );
     }
 
